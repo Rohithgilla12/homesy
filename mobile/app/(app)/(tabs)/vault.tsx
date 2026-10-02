@@ -3,7 +3,6 @@ import * as Clipboard from 'expo-clipboard';
 import { useState } from 'react';
 import {
   Alert,
-  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -12,6 +11,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import QRCode from 'react-native-qrcode-svg';
 import { api } from '@/api/client';
 import {
   VAULT_CATEGORY_LABEL,
@@ -23,6 +23,9 @@ import { Button, Card, Input, Muted, Row, Screen, Title } from '@/ui/primitives'
 import { colors, radius, space } from '@/ui/theme';
 
 const CATEGORIES = Object.keys(VAULT_CATEGORY_LABEL) as VaultCategory[];
+
+/** Escapes the characters the WIFI: QR payload format reserves (\ ; , : "). */
+const escapeWifi = (v: string) => v.replace(/([\\;,:"])/g, '\\$1');
 
 export default function VaultScreen() {
   const homeId = useActiveHome((s) => s.activeHomeId);
@@ -580,14 +583,11 @@ export default function VaultScreen() {
               {/* QR Code Container */}
               <View style={s.qrContainer}>
                 {wifiModalEntry && (
-                  <Image
-                    source={{
-                      uri: `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=12&data=${encodeURIComponent(
-                        `WIFI:T:WPA;S:${wifiSsid};P:${wifiModalEntry.value};;`
-                      )}`,
-                    }}
-                    style={s.qrImage}
-                    resizeMode="contain"
+                  // Rendered on-device: the payload contains the Wi-Fi password, so it must never go to a remote QR service
+                  <QRCode
+                    value={`WIFI:T:WPA;S:${escapeWifi(wifiSsid)};P:${escapeWifi(wifiModalEntry.value)};;`}
+                    size={220}
+                    quietZone={12}
                   />
                 )}
                 <Text style={s.qrHint}>📸 Scan with phone camera to connect</Text>
@@ -825,11 +825,6 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
     marginVertical: space(1),
-  },
-  qrImage: {
-    width: 220,
-    height: 220,
-    borderRadius: 8,
   },
   qrHint: {
     fontSize: 12,

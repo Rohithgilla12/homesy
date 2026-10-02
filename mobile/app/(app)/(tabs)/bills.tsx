@@ -22,6 +22,18 @@ import { useSession } from '@/store/session';
 import { Button, Card, Input, Muted, Row, Screen } from '@/ui/primitives';
 import { colors, radius, space } from '@/ui/theme';
 
+// The backend stores due_date as a SQL `date`, so only ISO dates deserialize.
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseDueDate(input: string): string | undefined {
+  const v = input.trim();
+  if (!v) return undefined;
+  if (!ISO_DATE.test(v) || Number.isNaN(new Date(v).getTime())) {
+    throw new Error('Due date must be in YYYY-MM-DD format, e.g. 2026-10-15.');
+  }
+  return v;
+}
+
 const CATEGORIES: BillCategory[] = [
   'electricity',
   'internet',
@@ -98,14 +110,15 @@ export default function BillsScreen() {
         throw new Error('Please enter a valid amount.');
       }
       const cents = Math.round(amount * 100);
+      const billingPeriod = addBillingPeriod.trim();
+      if (!billingPeriod) throw new Error('Please enter a billing period.');
       return api.createBill(homeId!, {
         title: addTitle.trim(),
         category: addCategory,
         amount_cents: cents,
-        consumer_id: addConsumerId.trim() || undefined,
         account_number: addConsumerId.trim() || undefined,
-        due_date: addDueDate.trim() || undefined,
-        billing_period: addBillingPeriod.trim() || undefined,
+        due_date: parseDueDate(addDueDate),
+        billing_period: billingPeriod,
         notes: addNotes.trim() || undefined,
       });
     },
@@ -131,7 +144,7 @@ export default function BillsScreen() {
       billId: string;
       paidBy?: string;
       notes?: string;
-    }) => api.payBill(billId, { paid_by: paidBy, payment_notes: notes }),
+    }) => api.payBill(billId, { paid_by: paidBy, payment_ref: notes }),
     onSuccess: () => {
       setPayModalBill(null);
       invalidate();
@@ -153,15 +166,17 @@ export default function BillsScreen() {
       amountCents,
     }: {
       billId: string;
-      period?: string;
-      dueDate?: string;
+      period: string;
+      dueDate: string;
       amountCents?: number;
-    }) =>
-      api.newCycleBill(billId, {
+    }) => {
+      if (!period) throw new Error('Please enter the next billing period.');
+      return api.newCycleBill(billId, {
         billing_period: period,
-        due_date: dueDate,
+        due_date: parseDueDate(dueDate),
         amount_cents: amountCents,
-      }),
+      });
+    },
     onSuccess: () => {
       setNextCycleBill(null);
       invalidate();
@@ -190,7 +205,8 @@ export default function BillsScreen() {
     return bills;
   }, [filterTab, unpaidBills, paidBills, bills]);
 
-  const formatCurrency = (cents: number) => {
+  const formatCurrency = (cents: number | null) => {
+    if (cents === null) return '—';
     const rupees = cents / 100;
     return `₹${rupees.toLocaleString('en-IN', {
       maximumFractionDigits: 2,
@@ -198,7 +214,7 @@ export default function BillsScreen() {
   };
 
   const handleCopyConsumerId = async (bill: HouseholdBill) => {
-    const acc = bill.consumer_id || bill.account_number;
+    const acc = bill.account_number;
     if (!acc) return;
     await Clipboard.setStringAsync(acc);
     setCopiedBillId(bill.id);
@@ -213,7 +229,7 @@ export default function BillsScreen() {
 
   const openNextCycleModal = (bill: HouseholdBill) => {
     setNextCycleBill(bill);
-    setNextCycleAmountStr((bill.amount_cents / 100).toString());
+    setNextCycleAmountStr(bill.amount_cents === null ? '' : (bill.amount_cents / 100).toString());
     // Guess next month
     const now = new Date();
     const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
@@ -223,11 +239,11 @@ export default function BillsScreen() {
     setNextCycleDueDate(bill.due_date || '');
   };
 
-  const getPayerName = (userId?: string | null) => {
-    if (!userId) return 'Someone';
-    if (userId === currentUserId) return 'You';
-    const m = members.find((mem) => mem.user_id === userId);
-    return m?.display_name || 'Flatmate';
+  const getPayerName = (bill: HouseholdBill) => {
+    if (!bill.paid_by) return 'Someone';
+    if (bill.paid_by === currentUserId) return 'You';
+    const m = members.find((mem) => mem.user_id === bill.paid_by);
+    return m?.display_name || bill.paid_by_name || 'Flatmate';
   };
 
   return (
@@ -350,9 +366,9 @@ export default function BillsScreen() {
           const categoryConfig =
             BILL_CATEGORY_CONFIG[item.category as BillCategory] ||
             BILL_CATEGORY_CONFIG.other;
-          const consumerNum = item.consumer_id || item.account_number;
+          const consumerNum = item.account_number;
           const isCopied = copiedBillId === item.id;
-          const payerName = getPayerName(item.paid_by);
+          const payerName = getPayerName(item);
 
           return (
             <Card style={[s.billCard, item.is_paid ? s.billCardPaid : s.billCardUnpaid]}>
@@ -407,7 +423,7 @@ export default function BillsScreen() {
                               day: 'numeric',
                             })}`
                           : ''}
-                        {item.payment_notes ? ` • ${item.payment_notes}` : ''}
+                        {item.payment_ref ? ` • ${item.payment_ref}` : ''}
                       </Text>
                     </View>
                   </Row>
@@ -599,7 +615,7 @@ export default function BillsScreen() {
                 <View style={{ flex: 1 }}>
                   <Muted>Due Date</Muted>
                   <Input
-                    placeholder="e.g. Oct 15 / 15th"
+                    placeholder="YYYY-MM-DD"
                     value={addDueDate}
                     onChangeText={setAddDueDate}
                   />
@@ -657,9 +673,9 @@ export default function BillsScreen() {
                 <Text style={{ fontSize: 22, fontWeight: '800', color: '#14532D', marginTop: 2 }}>
                   {formatCurrency(payModalBill.amount_cents)}
                 </Text>
-                {payModalBill.consumer_id ? (
+                {payModalBill.account_number ? (
                   <Muted style={{ fontSize: 12, marginTop: 4, color: '#166534' }}>
-                    Consumer ID: {payModalBill.consumer_id}
+                    Consumer ID: {payModalBill.account_number}
                   </Muted>
                 ) : null}
               </Card>
@@ -744,7 +760,7 @@ export default function BillsScreen() {
               <View style={{ flex: 1 }}>
                 <Muted>Due Date</Muted>
                 <Input
-                  placeholder="e.g. Nov 15"
+                  placeholder="YYYY-MM-DD"
                   value={nextCycleDueDate}
                   onChangeText={setNextCycleDueDate}
                 />
@@ -759,8 +775,8 @@ export default function BillsScreen() {
                 const cents = !isNaN(amt) && amt > 0 ? Math.round(amt * 100) : undefined;
                 nextCycleMutation.mutate({
                   billId: nextCycleBill.id,
-                  period: nextCyclePeriod.trim() || undefined,
-                  dueDate: nextCycleDueDate.trim() || undefined,
+                  period: nextCyclePeriod.trim(),
+                  dueDate: nextCycleDueDate,
                   amountCents: cents,
                 });
               }}

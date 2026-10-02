@@ -129,6 +129,8 @@ pub struct CreateBill {
 pub struct PayBill {
     pub amount_cents: Option<i64>,
     pub payment_ref: Option<String>,
+    /// Who actually paid; defaults to the caller. Must be a member of the bill's home.
+    pub paid_by: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

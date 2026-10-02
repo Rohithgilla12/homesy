@@ -43,17 +43,19 @@ Integration tests (`backend/tests/api_integration_test.rs`) connect to `DATABASE
 - **Migrations:** `backend/migrations/NNNN_name.sql`, embedded with `sqlx::migrate!` and applied at startup (and by the integration tests). Add a new numbered file; never edit an applied one, because SQLx checksums them.
 - **Realtime:** every mutating handler does two things after writing: `state.broadcast(HomeEvent { home_id, event_type, payload })` (event names such as `item_created`, `vault_updated`, `bill_paid`, `member_joined`), and `activity::log_activity(...)`, which inserts an `activities` row and broadcasts `activity_created`. `GET /homes/{id}/events` is an SSE stream over the single process-wide broadcast channel, filtered by `home_id`. Each event's data is the payload object with `type` and `resource` set to the event name. This is in-memory only, so it does not fan out across multiple backend instances.
 - New homes get three default lists (Groceries, Laundry, To-do) inside the create transaction. The last owner cannot leave a home.
+- **Bills:** `billing_period` is required on create and new-cycle. `due_date` is a SQL `date`, so it must be `YYYY-MM-DD` or the JSON extractor rejects the whole body with a plain-text 422. `POST /bills/{id}/pay` takes an optional `paid_by`, which defaults to the caller and must be a home member. `new-cycle` resets a bill to unpaid for the next period. The PATCH handlers merge with `Option::or(existing)`, so a null or empty field keeps the old value and cannot clear it.
 - The vault's `is_secret` only controls masking in the UI. Values are stored in plaintext.
 - CORS is `permissive()` (marked "tighten before prod").
 
 ## Mobile architecture
 
 - **Routing (`mobile/app/`):** the root `_layout.tsx` hydrates the session and active-home stores from SecureStore and redirects between `(auth)` and `(app)` based on the token. `(app)/_layout.tsx` fetches `['homes']`, renders the Home tab as onboarding when the user has no homes, and mounts `useHomeEvents(activeHomeId)`. The tabs are `index` (lists), `bills`, `vault`, `activity`, and `home`.
-- **API:** `src/api/client.ts` is the single typed `api` object. It reads the token from the Zustand session store, and any 401 triggers `signOut()`. Response types live in `src/api/types.ts`, mirrored by hand from `backend/src/models.rs`, so update both when changing a model. The import alias is `@/*` → `src/*`.
+- **API:** `src/api/client.ts` is the single typed `api` object. It reads the token from the Zustand session store, any 401 triggers `signOut()`, and plain-text error bodies (Axum rejections) are surfaced as the error message. Response types live in `src/api/types.ts`, mirrored by hand from `backend/src/models.rs` (see below). The import alias is `@/*` → `src/*`.
 - **State:** server state lives in TanStack Query, persisted to AsyncStorage (`HOMESY_QUERY_CACHE`, 24h). Query keys are scoped by home: `['lists', homeId]`, `['items', listId]`, `['vault', homeId]`, `['bills', homeId]`, `['bulletin', homeId]`, `['activity', homeId]`, `['home', homeId]`, `['homes']`. Client state is in Zustand: `store/session.ts` holds the token and user, `store/home.ts` holds the active home id, and both are persisted in SecureStore.
 - **Realtime sync (`src/api/events.ts`):** React Native has no `EventSource`, so SSE is read through `XMLHttpRequest` progress events with manual line parsing and exponential-backoff reconnects. Events are never applied to the cache directly. The hook only invalidates query keys by substring-matching the event name (`bill`, `vault`, `item`, …). A new backend event type needs a matching name or a branch here, or screens will not refresh.
 
-## Known drift
+## Conventions and gotchas
 
-- `api.expenses*` in `mobile/src/api/client.ts` (and the `expense` branches in `events.ts`) target `/homes/{id}/expenses` endpoints that no longer exist. Migration `0003_bills.sql` dropped the `expenses` table in favour of `household_bills`.
-- The API table in `README.md` covers only the original MVP routes. The `.route(...)` calls in `backend/src/routes/*.rs` are the source of truth.
+- When changing a request or response shape, update all three: the Rust struct (`models.rs` or the route module), `mobile/src/api/types.ts`, and the payload type in `mobile/src/api/client.ts`. `npm run typecheck` then flags each screen that uses the old shape.
+- Never send vault values to a third-party service. The Wi-Fi QR in `vault.tsx` is rendered on-device with `react-native-qrcode-svg` for this reason.
+- There is no `expenses` feature. Migration `0003_bills.sql` dropped it in favour of `household_bills`.

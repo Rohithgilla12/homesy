@@ -35,7 +35,6 @@ export default function ActivityScreen() {
   const getActionIcon = (action: string, resourceType: string) => {
     if (resourceType === 'notice') return '📌';
     if (resourceType === 'bill') return '⚡';
-    if (resourceType === 'expense') return '💳';
     if (resourceType === 'vault') return '🔐';
     if (resourceType === 'member') return '👥';
     if (action === 'completed') return '✅';
@@ -78,7 +77,7 @@ export default function ActivityScreen() {
           <Card style={{ alignItems: 'center', paddingVertical: space(3) }}>
             <Text style={{ fontSize: 32, marginBottom: space(1) }}>⚡</Text>
             <Text style={s.emptyTitle}>No activity yet</Text>
-            <Muted>Actions like adding list items, posting notes, or logging expenses will appear here.</Muted>
+            <Muted>Actions like adding list items, posting notes, or paying bills will appear here.</Muted>
           </Card>
         }
         renderItem={({ item }) => {

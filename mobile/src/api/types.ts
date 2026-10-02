@@ -39,42 +39,9 @@ export type Activity = {
   created_at: string;
 };
 
-export type ExpenseCategory = 'utilities' | 'groceries' | 'rent' | 'repairs' | 'household' | 'other';
-export type Expense = {
-  id: string;
-  home_id: string;
-  title: string;
-  amount_cents: number;
-  category: string;
-  paid_by: string;
-  created_at: string;
-};
-
-export type MemberSpend = {
-  user_id: string;
-  display_name: string;
-  paid_cents: number;
-  net_cents: number;
-};
-
-export type ExpenseBalances = {
-  total_cents: number;
-  per_member_cents: number;
-  member_count: number;
-  member_spends: MemberSpend[];
-};
-
 export const LIST_KIND_ICON: Record<ListKind, string> = { grocery: '🛒', laundry: '🧺', todo: '✅', custom: '📝' };
 export const VAULT_CATEGORY_LABEL: Record<VaultCategory, string> = {
   utilities: 'Utilities & bills', contacts: 'Contacts', access: 'Access & codes', documents: 'Documents', other: 'Other',
-};
-export const EXPENSE_CATEGORY_LABEL: Record<ExpenseCategory, string> = {
-  utilities: '💡 Utilities',
-  groceries: '🛒 Groceries',
-  rent: '🏠 Rent',
-  repairs: '🔧 Repairs',
-  household: '🛋️ Household',
-  other: '📦 Other',
 };
 
 export type BillCategory =
@@ -91,19 +58,20 @@ export type HouseholdBill = {
   home_id: string;
   title: string;
   category: BillCategory | string;
-  amount_cents: number;
-  consumer_id?: string | null;
-  account_number?: string | null;
-  due_date?: string | null;
-  billing_period?: string | null;
-  notes?: string | null;
+  account_number: string | null;
+  amount_cents: number | null;
+  due_date: string | null; // YYYY-MM-DD
+  billing_period: string;
   is_paid: boolean;
-  paid_by?: string | null;
-  paid_at?: string | null;
-  payment_notes?: string | null;
-  created_by?: string;
-  created_at?: string;
-  updated_at?: string;
+  paid_by: string | null;
+  paid_at: string | null;
+  payment_ref: string | null;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  paid_by_name: string | null;
+  created_by_name: string | null;
 };
 
 export const BILL_CATEGORY_CONFIG: Record<

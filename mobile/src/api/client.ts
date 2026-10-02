@@ -2,8 +2,6 @@ import { useSession } from '@/store/session';
 import type {
   Activity,
   BulletinNotice,
-  Expense,
-  ExpenseBalances,
   Home,
   HomeDetail,
   HouseholdBill,
@@ -33,8 +31,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     },
   });
   if (res.status === 401) useSession.getState().signOut();
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, body?.error ?? res.statusText);
+  // Axum's extractor rejections (e.g. 422 on a bad JSON body) are plain text, not `{ error }`.
+  const text = await res.text();
+  let body: unknown = {};
+  try { body = text ? JSON.parse(text) : {}; } catch { body = { error: text }; }
+  if (!res.ok) {
+    const error = (body as { error?: unknown } | null)?.error;
+    throw new ApiError(res.status, (typeof error === 'string' && error) || res.statusText || `HTTP ${res.status}`);
+  }
   return body as T;
 }
 
@@ -65,13 +69,6 @@ export const api = {
     request<BulletinNotice>(`/homes/${homeId}/bulletin`, { method: 'POST', body: json(b) }),
   deleteNotice: (id: string) => request<{ ok: true }>(`/bulletin/${id}`, { method: 'DELETE' }),
 
-  // expenses
-  expenses: (homeId: string) => request<Expense[]>(`/homes/${homeId}/expenses`),
-  createExpense: (homeId: string, b: { title: string; amount_cents: number; category: string; paid_by?: string }) =>
-    request<Expense>(`/homes/${homeId}/expenses`, { method: 'POST', body: json(b) }),
-  deleteExpense: (id: string) => request<{ ok: true }>(`/expenses/${id}`, { method: 'DELETE' }),
-  expenseBalances: (homeId: string) => request<ExpenseBalances>(`/homes/${homeId}/expenses/balances`),
-
   // lists
   lists: (homeId: string) => request<List[]>(`/homes/${homeId}/lists`),
   createList: (homeId: string, b: { kind: ListKind; name: string }) =>
@@ -100,11 +97,10 @@ export const api = {
     b: {
       title: string;
       category: string;
-      amount_cents: number;
-      consumer_id?: string;
+      billing_period: string;
+      amount_cents?: number;
       account_number?: string;
       due_date?: string;
-      billing_period?: string;
       notes?: string;
     }
   ) => request<HouseholdBill>(`/homes/${homeId}/bills`, { method: 'POST', body: json(b) }),
@@ -113,24 +109,18 @@ export const api = {
     b: Partial<{
       title: string;
       category: string;
+      billing_period: string;
       amount_cents: number;
-      consumer_id?: string;
-      account_number?: string;
-      due_date?: string;
-      billing_period?: string;
-      notes?: string;
-      is_paid?: boolean;
-      paid_by?: string;
-      paid_at?: string;
-      payment_notes?: string;
+      account_number: string;
+      due_date: string;
+      notes: string;
     }>
   ) => request<HouseholdBill>(`/bills/${id}`, { method: 'PATCH', body: json(b) }),
-  payBill: (id: string, b?: { paid_by?: string; payment_notes?: string }) =>
+  // paid_by defaults to the caller on the backend
+  payBill: (id: string, b?: { paid_by?: string; payment_ref?: string; amount_cents?: number }) =>
     request<HouseholdBill>(`/bills/${id}/pay`, { method: 'POST', body: json(b ?? {}) }),
   unpayBill: (id: string) => request<HouseholdBill>(`/bills/${id}/unpay`, { method: 'POST' }),
-  newCycleBill: (
-    id: string,
-    b?: { amount_cents?: number; due_date?: string; billing_period?: string }
-  ) => request<HouseholdBill>(`/bills/${id}/new-cycle`, { method: 'POST', body: json(b ?? {}) }),
+  newCycleBill: (id: string, b: { billing_period: string; amount_cents?: number; due_date?: string }) =>
+    request<HouseholdBill>(`/bills/${id}/new-cycle`, { method: 'POST', body: json(b) }),
   deleteBill: (id: string) => request<{ ok: true }>(`/bills/${id}`, { method: 'DELETE' }),
 };

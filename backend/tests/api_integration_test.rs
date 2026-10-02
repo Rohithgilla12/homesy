@@ -836,10 +836,9 @@ async fn test_full_api_flow() {
         )
         .await
         .unwrap();
-    let u3_token = parse_json_response(u3_signup.into_body()).await["token"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let u3_data = parse_json_response(u3_signup.into_body()).await;
+    let u3_token = u3_data["token"].as_str().unwrap().to_string();
+    let u3_id = u3_data["user"]["id"].as_str().unwrap().to_string();
 
     let forbidden_res = app
         .clone()
@@ -853,6 +852,44 @@ async fn test_full_api_flow() {
         .await
         .unwrap();
     assert_eq!(forbidden_res.status(), StatusCode::FORBIDDEN);
+
+    // A bill can only be marked as paid by someone in the home
+    let outsider_payer_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/bills/{bill1_id}/pay"))
+                .header(header::AUTHORIZATION, format!("Bearer {u1_token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "paid_by": u3_id }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outsider_payer_res.status(), StatusCode::BAD_REQUEST);
+
+    // User 1 records that User 2 paid
+    let u2_id = paid_bill["paid_by"].as_str().unwrap().to_string();
+    let on_behalf_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/bills/{bill1_id}/pay"))
+                .header(header::AUTHORIZATION, format!("Bearer {u1_token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "paid_by": u2_id, "payment_ref": "Cash" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(on_behalf_res.status(), StatusCode::OK);
+    let on_behalf_bill = parse_json_response(on_behalf_res.into_body()).await;
+    assert_eq!(on_behalf_bill["paid_by"], u2_id.as_str());
+    assert_eq!(on_behalf_bill["paid_by_name"], "User Two");
 
     // 17. Leave home: User 2 (member) leaves home
     let leave_res = app

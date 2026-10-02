@@ -17,13 +17,20 @@ homesy/
 
 ```
 User ──< HomeMember >── Home ──< List (grocery | laundry | todo | custom) ──< ListItem
-                          └────< VaultEntry (category, label, value, is_secret, pinned)
+                          ├────< VaultEntry (category, label, value, is_secret, pinned)
+                          ├────< HouseholdBill (category, amount, due date, billing period, paid by)
+                          ├────< BulletinNotice (title, content, priority normal | urgent)
+                          └────< Activity (who did what, written by every mutation)
 ```
 
 - A user joins a home with a 6-char invite code. Roles: `owner` | `member`.
-- Every list and vault entry is scoped to a home. Every API call checks membership.
+- Everything is scoped to a home. Every API call checks membership.
+- Bills are recurring: mark one paid (by you or another member), then "start next
+  cycle" to reset it for the next billing period. Payment is announced in the activity
+  feed so nobody pays twice.
 - `is_secret` vault entries (Wi-Fi password, gate code) are masked in the UI
   until tapped; they are *not* encrypted at rest in this MVP — see "Next".
+- Changes stream to every open client in the same home over SSE.
 
 ## Run it
 
@@ -43,10 +50,11 @@ npm install
 npx expo start
 ```
 
-## API (all JSON, `Authorization: Bearer <jwt>` except /auth/*)
+## API (all JSON, `Authorization: Bearer <jwt>` except /auth/* and /health)
 
 | Method | Path                     | Notes                                   |
 |--------|--------------------------|-----------------------------------------|
+| GET    | /health                  | `ok`                                    |
 | POST   | /auth/signup             | `{email, password, display_name}`       |
 | POST   | /auth/login              | `{email, password}` → `{token, user}`   |
 | GET    | /me                      |                                         |
@@ -54,21 +62,37 @@ npx expo start
 | POST   | /homes                   | `{name, emoji?}` → creates default lists|
 | POST   | /homes/join              | `{code}`                                |
 | GET    | /homes/{id}              | home + members                          |
+| POST   | /homes/{id}/leave        | the last owner cannot leave             |
+| GET    | /homes/{id}/activity     | `?limit=` (default 50, max 100)         |
+| GET    | /homes/{id}/events       | SSE stream of changes in this home      |
 | GET    | /homes/{id}/lists        |                                         |
 | POST   | /homes/{id}/lists        | `{kind, name}`                          |
 | GET    | /lists/{id}/items        |                                         |
 | POST   | /lists/{id}/items        | `{title, qty?, note?}`                  |
+| POST   | /lists/{id}/clear-completed | → `{deleted}`                        |
 | PATCH  | /items/{id}              | `{title?, qty?, note?, done?}`          |
 | DELETE | /items/{id}              |                                         |
 | GET    | /homes/{id}/vault        |                                         |
 | POST   | /homes/{id}/vault        | `{category, label, value, is_secret?, pinned?}` |
 | PATCH  | /vault/{id}              |                                         |
 | DELETE | /vault/{id}              |                                         |
+| GET    | /homes/{id}/bulletin     |                                         |
+| POST   | /homes/{id}/bulletin     | `{title, content, priority?}`           |
+| DELETE | /bulletin/{id}           |                                         |
+| GET    | /homes/{id}/bills        | unpaid first, then by due date          |
+| POST   | /homes/{id}/bills        | `{title, category, billing_period, amount_cents?, account_number?, due_date? (YYYY-MM-DD), notes?}` |
+| PATCH  | /bills/{id}              | any create field                        |
+| POST   | /bills/{id}/pay          | `{paid_by?, payment_ref?, amount_cents?}`; `paid_by` defaults to you |
+| POST   | /bills/{id}/unpay        |                                         |
+| POST   | /bills/{id}/new-cycle    | `{billing_period, due_date?, amount_cents?}` resets to unpaid |
+| DELETE | /bills/{id}              |                                         |
 
 ## Next (deliberately out of MVP)
 
-1. Realtime — SSE stream per home (`GET /homes/{id}/events`) using `tokio::sync::broadcast`.
-2. Offline-first — TanStack Query persist + optimistic mutations (Expo side only).
-3. Vault encryption — client-side AES-GCM with a per-home key shared via the invite.
-4. "Which home am I in?" — geofence per home address, auto-switch active home.
-5. Push (Expo Notifications) for "X added 3 items to Groceries".
+Done since the first cut: realtime SSE per home (`GET /homes/{id}/events`), and a
+persisted TanStack Query cache with optimistic list-item updates.
+
+1. Vault encryption — client-side AES-GCM with a per-home key shared via the invite.
+2. "Which home am I in?" — geofence per home address, auto-switch active home.
+3. Push (Expo Notifications) for "X added 3 items to Groceries".
+4. Realtime across multiple backend instances (the broadcast channel is in-process today).

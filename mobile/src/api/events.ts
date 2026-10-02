@@ -4,9 +4,11 @@ import { useSession } from '@/store/session';
 
 const BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
 
-export type HomeEvent = {
-  event?: string;
-  data?: any;
+/** Data of one SSE event: the backend payload object with `type` and `resource` set to the event name. */
+export type HomeEventData = {
+  type?: string;
+  resource?: string;
+  list_id?: string;
 };
 
 /**
@@ -16,6 +18,7 @@ export type HomeEvent = {
  * - items: ['items'] and ['items', listId]
  * - vault: ['vault', homeId]
  * - members/home: ['home', homeId] and ['homes']
+ * - bulletin, activity, bills: ['bulletin' | 'activity' | 'bills', homeId]
  */
 export function useHomeEvents(homeId: string | null) {
   const qc = useQueryClient();
@@ -31,11 +34,12 @@ export function useHomeEvents(homeId: string | null) {
     let xhr: XMLHttpRequest | null = null;
 
     const handleEventData = (eventType: string, dataRaw: string) => {
-      let parsedData: any = null;
+      let parsedData: HomeEventData | null = null;
       try {
-        parsedData = JSON.parse(dataRaw);
+        const parsed: unknown = JSON.parse(dataRaw);
+        if (parsed && typeof parsed === 'object') parsedData = parsed as HomeEventData;
       } catch {
-        parsedData = dataRaw;
+        // Non-JSON data: fall back to the SSE event name below
       }
 
       // Targeted cache invalidation based on event payload or type if present
@@ -50,8 +54,6 @@ export function useHomeEvents(homeId: string | null) {
         qc.invalidateQueries({ queryKey: ['homes'] });
         qc.invalidateQueries({ queryKey: ['bulletin', homeId] });
         qc.invalidateQueries({ queryKey: ['activity', homeId] });
-        qc.invalidateQueries({ queryKey: ['expenses', homeId] });
-        qc.invalidateQueries({ queryKey: ['expense-balances', homeId] });
         qc.invalidateQueries({ queryKey: ['bills', homeId] });
         return;
       }
@@ -81,18 +83,7 @@ export function useHomeEvents(homeId: string | null) {
       if (resource.includes('activity')) {
         qc.invalidateQueries({ queryKey: ['activity', homeId] });
       }
-      if (resource.includes('expense')) {
-        qc.invalidateQueries({ queryKey: ['expenses', homeId] });
-        qc.invalidateQueries({ queryKey: ['expense-balances', homeId] });
-      }
-      if (
-        resource.includes('bill') ||
-        resource === 'bill_created' ||
-        resource === 'bill_paid' ||
-        resource === 'bill_unpaid' ||
-        resource === 'bill_updated' ||
-        resource === 'bill_deleted'
-      ) {
+      if (resource.includes('bill')) {
         qc.invalidateQueries({ queryKey: ['bills', homeId] });
       }
     };

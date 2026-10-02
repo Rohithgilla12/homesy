@@ -253,6 +253,18 @@ async fn pay_bill(
     let home_id = bill_home(&s.pool, uid, bill_id).await?;
     let existing = fetch_bill_with_names(&s.pool, bill_id).await?;
 
+    let payer = b.paid_by.unwrap_or(uid);
+    if payer != uid {
+        ensure_member(&s.pool, payer, home_id)
+            .await
+            .map_err(|_| AppError::BadRequest("paid_by must be a member of this home".into()))?;
+    }
+    if let Some(amt) = b.amount_cents {
+        if amt < 0 {
+            return Err(AppError::BadRequest("amount_cents cannot be negative".into()));
+        }
+    }
+
     let new_amount_cents = b.amount_cents.or(existing.amount_cents);
     let payment_ref = b.payment_ref.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).or(existing.payment_ref);
 
@@ -261,7 +273,7 @@ async fn pay_bill(
          set is_paid = true, paid_by = $1, paid_at = now(), payment_ref = $2, amount_cents = $3, updated_at = now()
          where id = $4"
     )
-    .bind(uid)
+    .bind(payer)
     .bind(payment_ref)
     .bind(new_amount_cents)
     .bind(bill_id)
@@ -270,6 +282,10 @@ async fn pay_bill(
 
     let updated = fetch_bill_with_names(&s.pool, bill_id).await?;
     let user_name = get_user_display_name(&s.pool, uid).await?;
+    let paid_by_suffix = match (&updated.paid_by_name, payer != uid) {
+        (Some(name), true) => format!(" (paid by {name})"),
+        _ => String::new(),
+    };
 
     let amount_str = match updated.amount_cents {
         Some(cents) => {
@@ -281,7 +297,10 @@ async fn pay_bill(
         }
         None => String::new(),
     };
-    let desc = format!("{user_name} marked {}{amount_str} as PAID — DO NOT REPAY", updated.title);
+    let desc = format!(
+        "{user_name} marked {}{amount_str} as PAID{paid_by_suffix} — DO NOT REPAY",
+        updated.title
+    );
 
     log_activity(
         &s,

@@ -1,0 +1,74 @@
+# Production stack on the host, installed as ~/homesy/compose.yml next to .env, cloudflared.yml and deploy.sh.
+# All values come from ~/homesy/.env (host-only). Required ones fail the deploy when missing instead of failing open.
+name: homesy
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  homesy-postgres:
+    image: postgres:16-alpine
+    container_name: homesy-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: homesy
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: homesy
+    volumes:
+      - homesy-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U homesy -d homesy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+    logging: *logging
+    networks: [homesy-internal]
+
+  homesy-api:
+    # Keep HOMESY_IMAGE at :latest; pin a :<sha> only while rolling back (see DEPLOY.md).
+    image: ${HOMESY_IMAGE:-ghcr.io/rohithgilla12/homesy-api:latest}
+    container_name: homesy-api
+    restart: unless-stopped
+    depends_on:
+      homesy-postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://homesy:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@homesy-postgres:5432/homesy
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      PORT: "8080"
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required}
+      RUST_LOG: ${RUST_LOG:-homesy_api=info,tower_http=info}
+    cpus: 1.0
+    mem_limit: 512m
+    stop_grace_period: 10s
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+    logging: *logging
+    networks: [homesy-internal]
+
+  homesy-cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: homesy-cloudflared
+    restart: unless-stopped
+    depends_on: [homesy-api]
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?TUNNEL_TOKEN is required}
+    volumes:
+      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
+    logging: *logging
+    networks: [homesy-internal]
+
+volumes:
+  homesy-pgdata:
+    name: homesy-pgdata
+
+networks:
+  homesy-internal:
+    name: homesy-internal

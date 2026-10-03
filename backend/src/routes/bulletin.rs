@@ -15,7 +15,10 @@ use uuid::Uuid;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/homes/{id}/bulletin", get(list_notices).post(create_notice))
+        .route(
+            "/homes/{id}/bulletin",
+            get(list_notices).post(create_notice),
+        )
         .route("/bulletin/{id}", axum::routing::delete(delete_notice))
 }
 
@@ -70,7 +73,9 @@ async fn create_notice(
     }
     let priority = b.priority.as_deref().unwrap_or("normal").to_lowercase();
     if priority != "normal" && priority != "urgent" {
-        return Err(AppError::BadRequest("priority must be normal or urgent".into()));
+        return Err(AppError::BadRequest(
+            "priority must be normal or urgent".into(),
+        ));
     }
 
     let notice: BulletinNotice = sqlx::query_as(&format!(
@@ -100,7 +105,8 @@ async fn create_notice(
         "created",
         "notice",
         &format!("Posted notice \"{}\"", notice.title),
-    ).await;
+    )
+    .await;
 
     Ok(Json(notice))
 }
@@ -112,10 +118,11 @@ async fn delete_notice(
 ) -> AppResult<Json<serde_json::Value>> {
     let home_id = notice_home(&s.pool, uid, notice_id).await?;
 
-    let existing: Option<(String,)> = sqlx::query_as("select title from bulletin_notices where id = $1")
-        .bind(notice_id)
-        .fetch_optional(&s.pool)
-        .await?;
+    let existing: Option<(String,)> =
+        sqlx::query_as("select title from bulletin_notices where id = $1")
+            .bind(notice_id)
+            .fetch_optional(&s.pool)
+            .await?;
 
     sqlx::query("delete from bulletin_notices where id = $1")
         .bind(notice_id)
@@ -132,14 +139,7 @@ async fn delete_notice(
         Some((t,)) => format!("Deleted notice \"{}\"", t),
         None => "Deleted notice".to_string(),
     };
-    log_activity(
-        &s,
-        home_id,
-        uid,
-        "deleted",
-        "notice",
-        &desc,
-    ).await;
+    log_activity(&s, home_id, uid, "deleted", "notice", &desc).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }

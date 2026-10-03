@@ -25,15 +25,22 @@ pub fn issue_token(secret: &str, user_id: Uuid) -> anyhow::Result<String> {
         iat: now.timestamp() as usize,
         exp: (now + Duration::days(30)).timestamp() as usize,
     };
-    Ok(encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))?)
+    Ok(encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )?)
 }
 
 pub(crate) fn verify_token(secret: &str, token: &str) -> Option<Uuid> {
-    decode::<Claims>(token, &DecodingKey::from_secret(secret.as_bytes()), &Validation::default())
-        .ok()
-        .map(|d| d.claims.sub)
+    decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &Validation::default(),
+    )
+    .ok()
+    .map(|d| d.claims.sub)
 }
-
 
 pub fn hash_password(pw: &str) -> anyhow::Result<String> {
     let salt = SaltString::generate(&mut OsRng);
@@ -56,13 +63,18 @@ pub struct AuthUser(pub Uuid);
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = AppError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         let header = parts
             .headers
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .ok_or(AppError::Unauthorized)?;
-        let token = header.strip_prefix("Bearer ").ok_or(AppError::Unauthorized)?;
+        let token = header
+            .strip_prefix("Bearer ")
+            .ok_or(AppError::Unauthorized)?;
         verify_token(&state.jwt_secret, token)
             .map(AuthUser)
             .ok_or(AppError::Unauthorized)
@@ -70,7 +82,11 @@ impl FromRequestParts<AppState> for AuthUser {
 }
 
 /// Fails with 403 unless `user_id` is a member of `home_id`.
-pub async fn ensure_member(pool: &sqlx::PgPool, user_id: Uuid, home_id: Uuid) -> Result<(), AppError> {
+pub async fn ensure_member(
+    pool: &sqlx::PgPool,
+    user_id: Uuid,
+    home_id: Uuid,
+) -> Result<(), AppError> {
     let exists: Option<(i32,)> =
         sqlx::query_as("select 1 from home_members where home_id = $1 and user_id = $2")
             .bind(home_id)
@@ -110,4 +126,3 @@ mod tests {
         assert_eq!(invalid, None);
     }
 }
-

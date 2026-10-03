@@ -11,7 +11,10 @@ impl Config {
         Ok(Self {
             database_url: std::env::var("DATABASE_URL").context("DATABASE_URL not set")?,
             jwt_secret: std::env::var("JWT_SECRET").context("JWT_SECRET not set")?,
-            port: std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080),
+            port: std::env::var("PORT")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(8080),
         })
     }
 }

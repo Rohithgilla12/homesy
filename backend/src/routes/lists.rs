@@ -24,7 +24,8 @@ pub fn router() -> Router<AppState> {
 
 const LIST_KINDS: &[&str] = &["grocery", "laundry", "todo", "custom"];
 
-const ITEM_COLS: &str = "id, list_id, title, qty, note, done, done_by, done_at, created_by, created_at";
+const ITEM_COLS: &str =
+    "id, list_id, title, qty, note, done, done_by, done_at, created_by, created_at";
 
 #[derive(Deserialize)]
 struct CreateList {
@@ -97,7 +98,9 @@ async fn create_list(
 ) -> AppResult<Json<List>> {
     ensure_member(&s.pool, uid, home_id).await?;
     if !LIST_KINDS.contains(&b.kind.as_str()) {
-        return Err(AppError::BadRequest(format!("kind must be one of {LIST_KINDS:?}")));
+        return Err(AppError::BadRequest(format!(
+            "kind must be one of {LIST_KINDS:?}"
+        )));
     }
     let name = b.name.trim();
     if name.is_empty() {
@@ -127,7 +130,8 @@ async fn create_list(
         "created",
         "list",
         &format!("Created list \"{}\"", list.name),
-    ).await;
+    )
+    .await;
 
     Ok(Json(list))
 }
@@ -184,7 +188,8 @@ async fn create_item(
         "created",
         "item",
         &format!("Added item \"{}\"", item.title),
-    ).await;
+    )
+    .await;
 
     Ok(Json(item))
 }
@@ -248,7 +253,8 @@ async fn update_item(
                 "completed",
                 "item",
                 &format!("Completed item \"{}\"", item.title),
-            ).await;
+            )
+            .await;
         }
     }
 
@@ -262,12 +268,16 @@ async fn delete_item(
 ) -> AppResult<Json<serde_json::Value>> {
     let home_id = item_home(&s.pool, uid, item_id).await?;
 
-    let existing_title: Option<(String,)> = sqlx::query_as("select title from list_items where id = $1")
-        .bind(item_id)
-        .fetch_optional(&s.pool)
-        .await?;
+    let existing_title: Option<(String,)> =
+        sqlx::query_as("select title from list_items where id = $1")
+            .bind(item_id)
+            .fetch_optional(&s.pool)
+            .await?;
 
-    sqlx::query("delete from list_items where id = $1").bind(item_id).execute(&s.pool).await?;
+    sqlx::query("delete from list_items where id = $1")
+        .bind(item_id)
+        .execute(&s.pool)
+        .await?;
 
     s.broadcast(crate::models::HomeEvent {
         home_id,
@@ -279,14 +289,7 @@ async fn delete_item(
         Some((title,)) => format!("Deleted item \"{}\"", title),
         None => "Deleted item".to_string(),
     };
-    log_activity(
-        &s,
-        home_id,
-        uid,
-        "deleted",
-        "item",
-        &desc,
-    ).await;
+    log_activity(&s, home_id, uid, "deleted", "item", &desc).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -318,8 +321,8 @@ async fn clear_completed(
         "cleared_completed",
         "list",
         &format!("Cleared {} completed item(s)", count),
-    ).await;
+    )
+    .await;
 
     Ok(Json(serde_json::json!({ "deleted": count })))
 }
-

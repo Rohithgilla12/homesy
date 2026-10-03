@@ -425,7 +425,10 @@ async fn test_full_api_flow() {
         )
         .await
         .unwrap();
-    let c1_id = parse_json_response(c1_res.into_body()).await["id"].as_str().unwrap().to_string();
+    let c1_id = parse_json_response(c1_res.into_body()).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let _ = app
         .clone()
@@ -435,9 +438,7 @@ async fn test_full_api_flow() {
                 .uri(format!("/items/{c1_id}"))
                 .header(header::AUTHORIZATION, format!("Bearer {u1_token}"))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({ "done": true }).to_string(),
-                ))
+                .body(Body::from(json!({ "done": true }).to_string()))
                 .unwrap(),
         )
         .await
@@ -1083,7 +1084,8 @@ async fn test_bills_sse_events_and_ordering() {
 
     let event_a = rx.recv().await.unwrap();
     let event_b = rx.recv().await.unwrap();
-    let has_unpaid_event = event_a.event_type == "bill_unpaid" || event_b.event_type == "bill_unpaid";
+    let has_unpaid_event =
+        event_a.event_type == "bill_unpaid" || event_b.event_type == "bill_unpaid";
     assert!(has_unpaid_event, "Should receive bill_unpaid SSE");
 
     // 4. Delete bill

@@ -56,7 +56,7 @@ services:
     image: cloudflare/cloudflared:latest
     container_name: homesy-cloudflared
     restart: unless-stopped
-    depends_on: [homesy-api]
+    # No depends_on: it would make every API recreate also restart the tunnel. cloudflared retries the origin itself.
     command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:?TUNNEL_TOKEN is required}

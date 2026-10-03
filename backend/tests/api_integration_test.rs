@@ -1142,19 +1142,19 @@ fn preflight(origin: &str, method: &str) -> Request<Body> {
 
 #[tokio::test]
 async fn test_cors_allows_preflight_from_listed_origin() {
-    let origins = vec!["https://app.homesy.gilla.fun".to_string()];
+    let origins = vec!["https://homesy-app.gilla.fun".to_string()];
     let app = create_app(unconnected_state(), Some(&origins));
 
     for method in ["PATCH", "DELETE"] {
         let res = app
             .clone()
-            .oneshot(preflight("https://app.homesy.gilla.fun", method))
+            .oneshot(preflight("https://homesy-app.gilla.fun", method))
             .await
             .unwrap();
         let headers = res.headers();
         assert_eq!(
             headers[header::ACCESS_CONTROL_ALLOW_ORIGIN],
-            "https://app.homesy.gilla.fun"
+            "https://homesy-app.gilla.fun"
         );
         assert!(headers[header::ACCESS_CONTROL_ALLOW_METHODS]
             .to_str()
@@ -1175,7 +1175,7 @@ async fn test_cors_allows_preflight_from_listed_origin() {
 
 #[tokio::test]
 async fn test_cors_rejects_unlisted_origin() {
-    let origins = vec!["https://app.homesy.gilla.fun".to_string()];
+    let origins = vec!["https://homesy-app.gilla.fun".to_string()];
     let app = create_app(unconnected_state(), Some(&origins));
 
     let res = app

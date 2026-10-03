@@ -46,7 +46,7 @@ Integration tests (`backend/tests/api_integration_test.rs`) connect to `DATABASE
 - **Bills:** `billing_period` is required on create and new-cycle. `due_date` is a SQL `date`, so it must be `YYYY-MM-DD` or the JSON extractor rejects the whole body with a plain-text 422. `POST /bills/{id}/pay` takes an optional `paid_by`, which defaults to the caller and must be a home member. `new-cycle` resets a bill to unpaid for the next period. The PATCH handlers merge with `Option::or(existing)`, so a null or empty field keeps the old value and cannot clear it.
 - The vault's `is_secret` only controls masking in the UI. Values are stored in plaintext.
 - **CORS** is permissive unless `CORS_ORIGINS` is set (comma-separated `scheme://host[:port]`, validated at startup). Production sets it to the web app origin.
-- **Deployment:** merging backend changes to `main` tests, builds an arm64 image, and deploys it to `https://api.homesy.gilla.fun` (see `DEPLOY.md`). The API runs as a single instance, which the in-process SSE broadcast requires. `/health` pings the database and returns 503 within about 2 s when it is down.
+- **Deployment:** merging backend changes to `main` tests, builds an arm64 image, and deploys it to `https://homesy-api.gilla.fun` (see `DEPLOY.md`). The API runs as a single instance, which the in-process SSE broadcast requires. `/health` pings the database and returns 503 within about 2 s when it is down.
 
 ## Mobile architecture
 

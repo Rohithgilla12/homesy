@@ -1,6 +1,6 @@
 # Deploying the Homesy API
 
-Production is `https://api.homesy.gilla.fun`. It is one compose stack (`deploy/compose.prod.yml`) on a shared arm64 host, reached only through a Cloudflare Tunnel; the host exposes no ports. Host access details are kept outside this repository.
+Production is `https://homesy-api.gilla.fun`. It is one compose stack (`deploy/compose.prod.yml`) on a shared arm64 host, reached only through a Cloudflare Tunnel; the host exposes no ports. Host access details are kept outside this repository.
 
 ## How a deploy happens
 
@@ -26,7 +26,7 @@ Changes to `deploy/compose.prod.yml`, `deploy/cloudflared.yml`, or `deploy/deplo
 ## Rollback
 
 1. In `~/homesy/.env`, set `HOMESY_IMAGE=ghcr.io/rohithgilla12/homesy-api:<good-sha>`.
-2. Run `~/homesy/deploy.sh` and check `curl -fsS https://api.homesy.gilla.fun/health`.
+2. Run `~/homesy/deploy.sh` and check `curl -fsS https://homesy-api.gilla.fun/health`.
 3. Once a fix ships, set `HOMESY_IMAGE` back to `:latest`. While it is pinned, `deploy.sh` warns, and CI deploys fail with an error instead of reporting a deploy that shipped nothing.
 
 ## Migrations

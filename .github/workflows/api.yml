@@ -94,7 +94,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: production
-      url: https://api.homesy.gilla.fun
+      url: https://homesy-api.gilla.fun
     steps:
       - name: Configure SSH
         env:
@@ -123,7 +123,7 @@ jobs:
       - name: Smoke test
         run: |
           for attempt in 1 2 3 4 5; do
-            if curl --max-time 8 -fsS https://api.homesy.gilla.fun/health; then echo; exit 0; fi
+            if curl --max-time 8 -fsS https://homesy-api.gilla.fun/health; then echo; exit 0; fi
             echo "attempt $attempt failed; retrying in 5s"
             sleep 5
           done

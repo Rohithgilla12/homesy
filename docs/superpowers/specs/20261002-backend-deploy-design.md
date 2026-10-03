@@ -1,7 +1,8 @@
 # Backend deployment — design
 
 - **Date:** 2026-10-02
-- **Status:** Draft, awaiting review
+- **Status:** Approved; implemented
+- **Amended 2026-10-03:** hostnames flattened from `api.homesy.gilla.fun` / `app.homesy.gilla.fun` to `homesy-api.gilla.fun` / `homesy-app.gilla.fun`. Cloudflare's free Universal SSL certificate covers only one subdomain level (`*.gilla.fun`), so the two-level names failed the TLS handshake. Sub-project 4's marketing site keeps `homesy.gilla.fun`.
 - **Sub-project:** 1 of 4 in the "ship the beta" effort
 
 This repository is treated as public. This document, and every file it introduces, must contain no host addresses, SSH users, ports specific to the host, tokens, or secrets. Operator details live outside the repo (see "Operator notes").
@@ -12,14 +13,14 @@ Homesy is going to a friends-and-family beta through external TestFlight, with a
 
 1. **Backend deployment** (this document). This blocks 2 and 3.
 2. iOS release: EAS project, build profiles, icon, account deletion, TestFlight.
-3. Web app: Expo web build at `app.homesy.gilla.fun`.
+3. Web app: Expo web build at `homesy-app.gilla.fun`.
 4. Marketing site: Astro static site at `homesy.gilla.fun`, with privacy and support pages.
 
 Today the API runs only on a developer machine. A TestFlight build cannot reach a LAN address, and iOS App Transport Security rejects plain HTTP, so a public HTTPS API is a prerequisite for everything else.
 
 ## Goals
 
-- The API is reachable at `https://api.homesy.gilla.fun`, backed by a persistent Postgres.
+- The API is reachable at `https://homesy-api.gilla.fun`, backed by a persistent Postgres.
 - Every push to `main` that touches `backend/` is tested, built, deployed, and smoke-tested with no manual steps.
 - Homesy cannot degrade the shared host it runs on.
 - Database data is backed up nightly and before every deploy.
@@ -46,7 +47,7 @@ Today the API runs only on a developer machine. A TestFlight build cannot reach 
 
 ```
 iPhone / browser ──HTTPS──▶ Cloudflare edge ──tunnel──▶ homesy-cloudflared ──▶ homesy-api:8080 ──▶ homesy-postgres:5432
-                          (api.homesy.gilla.fun)       (outbound-only; no inbound ports on the host)
+                          (homesy-api.gilla.fun)       (outbound-only; no inbound ports on the host)
 ```
 
 One compose project, `homesy`, lives in `~/homesy` on the host. It has three services on a private bridge network, `homesy-internal`. No service publishes a port to the host.
@@ -55,7 +56,7 @@ One compose project, `homesy`, lives in `~/homesy` on the host. It has three ser
 |---|---|---|
 | `homesy-postgres` | `postgres:16-alpine` | Named volume `homesy-pgdata`. Has a healthcheck (`pg_isready`). The image name matches the backup job's discovery pattern. |
 | `homesy-api` | `${HOMESY_IMAGE:-ghcr.io/rohithgilla12/homesy-api:latest}` | Limited to `cpus: 1.0` and `mem_limit: 512m`. Starts after `homesy-postgres` is healthy. Runs migrations on boot (unchanged behaviour). |
-| `homesy-cloudflared` | `cloudflare/cloudflared:latest` | Runs `tunnel --no-autoupdate --config /etc/cloudflared/config.yml run` with `TUNNEL_TOKEN`. The ingress file `deploy/cloudflared.yml` is committed and mounted read-only. It holds only the public hostname mapping (`api.homesy.gilla.fun` to `http://homesy-api:8080`, plus a catch-all `http_status:404`), with no tunnel ID or credentials. The token identifies the tunnel. |
+| `homesy-cloudflared` | `cloudflare/cloudflared:latest` | Runs `tunnel --no-autoupdate --config /etc/cloudflared/config.yml run` with `TUNNEL_TOKEN`. The ingress file `deploy/cloudflared.yml` is committed and mounted read-only. It holds only the public hostname mapping (`homesy-api.gilla.fun` to `http://homesy-api:8080`, plus a catch-all `http_status:404`), with no tunnel ID or credentials. The token identifies the tunnel. |
 
 **Rules that apply to all three services:**
 
@@ -94,7 +95,7 @@ The workflow file is `.github/workflows/api.yml`. It triggers on `push` and `pul
 |---|---|---|---|
 | `test` | `ubuntu-latest` | always | Postgres 16 service container. `Swatinem/rust-cache`. `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` with `DATABASE_URL` pointing at the service. |
 | `build-push` | `ubuntu-24.04-arm` (native arm64; available to private repos at 2 vCPU / 8 GB, billed against Actions minutes) | push to `main`, after `test` | Buildx, GHCR login with `GITHUB_TOKEN`. Push `:<short-sha>` and `:latest` for `linux/arm64`, with the GitHub Actions build cache and `provenance: false`. |
-| `deploy` | `ubuntu-latest`, environment `production` | push to `main`, after `build-push` | Write the SSH key and known host from secrets, then SSH to the host. A forced command runs `~/homesy/deploy.sh`. Smoke test: `curl -fsS https://api.homesy.gilla.fun/health`, up to 5 attempts, 5 s apart. |
+| `deploy` | `ubuntu-latest`, environment `production` | push to `main`, after `build-push` | Write the SSH key and known host from secrets, then SSH to the host. A forced command runs `~/homesy/deploy.sh`. Smoke test: `curl -fsS https://homesy-api.gilla.fun/health`, up to 5 attempts, 5 s apart. |
 
 **Secrets** for the GitHub `production` environment: `VPS_SSH_PRIVATE_KEY`, `VPS_HOST_KEY`, `VPS_HOST`, and `VPS_USER`. They are set with `gh secret set --env production`. The private key is piped from a file and never printed. The key pair is dedicated to Homesy and is not shared with other projects.
 
@@ -121,18 +122,18 @@ The workflow file is `.github/workflows/api.yml`. It triggers on `push` and `pul
 - **Secrets** live in `~/homesy/.env` on the host only. The backup job captures that file nightly.
   - `POSTGRES_PASSWORD` and `JWT_SECRET` are generated on the host with `openssl rand -hex 32`, so they never pass through chat or git.
   - `TUNNEL_TOKEN` is written on the host directly from the `cloudflared` output.
-  - `CORS_ORIGINS=https://app.homesy.gilla.fun`.
+  - `CORS_ORIGINS=https://homesy-app.gilla.fun`.
   - `RUST_LOG=homesy_api=info,tower_http=info`.
   - The owner stores copies of `POSTGRES_PASSWORD`, `JWT_SECRET`, and `TUNNEL_TOKEN` in 1Password.
-- **Monitoring:** add a Gatus endpoint for `https://api.homesy.gilla.fun/health`, using Gatus's existing alerting.
-- **Abuse protection:** a Cloudflare rate-limiting rule on `api.homesy.gilla.fun/auth/*`, at 10 requests per minute per IP with a block action. Every auth request runs Argon2, which is deliberately CPU-expensive, so the edge must absorb floods before they reach the shared host.
+- **Monitoring:** add a Gatus endpoint for `https://homesy-api.gilla.fun/health`, using Gatus's existing alerting.
+- **Abuse protection:** a Cloudflare rate-limiting rule on `homesy-api.gilla.fun/auth/*`, at 10 requests per minute per IP with a block action. Every auth request runs Argon2, which is deliberately CPU-expensive, so the edge must absorb floods before they reach the shared host.
 
 ## Setup responsibilities
 
 | Step | Who | How |
 |---|---|---|
 | Repo changes (API changes, Dockerfile, compose, deploy script, workflow, `DEPLOY.md`, `CLAUDE.md` update) | Claude | Code review, then CI |
-| Create the `homesy` tunnel and the `api.homesy.gilla.fun` DNS route | Claude | `cloudflared tunnel login` (the owner clicks Authorize once in the browser), then `cloudflared tunnel create` and `cloudflared tunnel route dns`. The token is written straight to the host's `.env`. |
+| Create the `homesy` tunnel and the `homesy-api.gilla.fun` DNS route | Claude | `cloudflared tunnel login` (the owner clicks Authorize once in the browser), then `cloudflared tunnel create` and `cloudflared tunnel route dns`. The token is written straight to the host's `.env`. |
 | Rate-limiting rule | Owner, or Claude with a scoped token | Neither the wrangler OAuth login nor the cloudflared certificate grants firewall-rule edit permission. Either the owner adds the rule in the dashboard using the values above, or the owner creates an API token limited to Zone WAF edit for `gilla.fun` (kept in 1Password) and Claude applies it through the API. |
 | GitHub `production` environment and secrets | Claude | `gh api` and `gh secret set --env production` |
 | Host setup: directory, `.env` secrets, deploy key, GHCR login, Gatus check, first `docker compose up` | Claude over SSH | Each state-changing step is confirmed with the owner first |
@@ -147,7 +148,7 @@ Host address, SSH user, deploy-key fingerprint, tunnel ID, and troubleshooting n
 - **Locally:** `cargo test` passes, including a test that `/health` returns 200 with a live DB. `docker build` succeeds for `linux/arm64`. The CORS layer rejects an unlisted `Origin` when `CORS_ORIGINS` is set.
 - **CI:** `test` runs green on a PR, and `build-push` and `deploy` run green on merge to `main`.
 - **Production:**
-  - `https://api.homesy.gilla.fun/health` returns `200`.
+  - `https://homesy-api.gilla.fun/health` returns `200`.
   - `POST /auth/signup` followed by `GET /me` works end to end.
   - An SSE connection to `/homes/{id}/events` stays open for more than 2 minutes and receives an event after a mutation.
   - `docker stats` shows the API inside its limits.

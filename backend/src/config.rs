@@ -61,22 +61,22 @@ mod tests {
     #[test]
     fn parses_and_trims_a_comma_separated_list() {
         let origins =
-            parse_origins(" https://app.homesy.gilla.fun , http://localhost:8081 ").unwrap();
+            parse_origins(" https://homesy-app.gilla.fun , http://localhost:8081 ").unwrap();
         assert_eq!(
             origins,
-            vec!["https://app.homesy.gilla.fun", "http://localhost:8081"]
+            vec!["https://homesy-app.gilla.fun", "http://localhost:8081"]
         );
     }
 
     #[test]
     fn rejects_a_trailing_slash() {
         // Browsers never send a trailing slash in Origin, so this entry would silently match nothing.
-        assert!(parse_origins("https://app.homesy.gilla.fun/").is_err());
+        assert!(parse_origins("https://homesy-app.gilla.fun/").is_err());
     }
 
     #[test]
     fn rejects_a_missing_scheme() {
-        assert!(parse_origins("app.homesy.gilla.fun").is_err());
+        assert!(parse_origins("homesy-app.gilla.fun").is_err());
     }
 
     #[test]

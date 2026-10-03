@@ -16,6 +16,9 @@ setup() {
 echo "$*" >> "$STUB_CALLS"
 if [ "$1" = inspect ] && [[ "$*" == *State.Running* ]]; then echo "${STUB_PG_RUNNING:-true}"; exit 0; fi
 if [ "$1" = exec ]; then [ "${STUB_DUMP_FAILS:-0}" = 1 ] && exit 1; echo "-- dump"; exit 0; fi
+if [ "$1 $2" = "compose pull" ]; then
+  if [ -n "${DOCKER_CONFIG:-}" ] && [ -d "$DOCKER_CONFIG" ] && [ -z "$(ls -A "$DOCKER_CONFIG")" ]; then echo anonymous; else echo "host-config"; fi > "$STUB_CALLS.pull"
+fi
 exit 0
 STUB
   chmod +x "$work/bin/docker"
@@ -38,6 +41,8 @@ test_backs_up_rotates_and_deploys() {
   grep -q '^compose up -d$' "$work/calls" || fail "no compose up"
   grep -q '^image prune -f --filter label=org.opencontainers.image.source=https://github.com/Rohithgilla12/homesy$' "$work/calls" \
     || fail "superseded homesy images not pruned"
+  # The image is public; host-wide ghcr.io credentials belong to other projects and must not be used.
+  [ "$(cat "$work/calls.pull")" = anonymous ] || fail "pull did not use an empty, anonymous docker config"
 }
 
 test_failed_dump_aborts_before_touching_containers() {

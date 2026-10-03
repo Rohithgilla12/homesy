@@ -3,6 +3,7 @@
 - **Date:** 2026-10-02
 - **Status:** Approved; implemented
 - **Amended 2026-10-03:** hostnames flattened from `api.homesy.gilla.fun` / `app.homesy.gilla.fun` to `homesy-api.gilla.fun` / `homesy-app.gilla.fun`. Cloudflare's free Universal SSL certificate covers only one subdomain level (`*.gilla.fun`), so the two-level names failed the TLS handshake. Sub-project 4's marketing site keeps `homesy.gilla.fun`.
+- **Amended 2026-10-03:** the repository and the `homesy-api` image are now public. `deploy.sh` pulls the image anonymously with an empty Docker config, because the host's shared `ghcr.io` login (used by other projects) lacks package scope and got the pull denied. No registry credential is needed on the host.
 - **Sub-project:** 1 of 4 in the "ship the beta" effort
 
 This repository is treated as public. This document, and every file it introduces, must contain no host addresses, SSH users, ports specific to the host, tokens, or secrets. Operator details live outside the repo (see "Operator notes").

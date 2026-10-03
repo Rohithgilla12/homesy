@@ -24,7 +24,7 @@ cargo test                 # unit + integration; integration needs the DB up
 cargo test --lib                                          # unit tests only, no DB
 cargo test --lib auth::tests::test_jwt_issuance_and_verification
 cargo test --test api_integration_test test_sse_events_broadcast
-cargo clippy && cargo fmt
+cargo fmt --check && cargo clippy --all-targets -- -D warnings   # what CI enforces
 
 # Mobile (from mobile/)
 npm install
@@ -45,7 +45,8 @@ Integration tests (`backend/tests/api_integration_test.rs`) connect to `DATABASE
 - New homes get three default lists (Groceries, Laundry, To-do) inside the create transaction. The last owner cannot leave a home.
 - **Bills:** `billing_period` is required on create and new-cycle. `due_date` is a SQL `date`, so it must be `YYYY-MM-DD` or the JSON extractor rejects the whole body with a plain-text 422. `POST /bills/{id}/pay` takes an optional `paid_by`, which defaults to the caller and must be a home member. `new-cycle` resets a bill to unpaid for the next period. The PATCH handlers merge with `Option::or(existing)`, so a null or empty field keeps the old value and cannot clear it.
 - The vault's `is_secret` only controls masking in the UI. Values are stored in plaintext.
-- CORS is `permissive()` (marked "tighten before prod").
+- **CORS** is permissive unless `CORS_ORIGINS` is set (comma-separated `scheme://host[:port]`, validated at startup). Production sets it to the web app origin.
+- **Deployment:** merging backend changes to `main` tests, builds an arm64 image, and deploys it to `https://api.homesy.gilla.fun` (see `DEPLOY.md`). The API runs as a single instance, which the in-process SSE broadcast requires. `/health` pings the database and returns 503 within about 2 s when it is down.
 
 ## Mobile architecture
 
@@ -59,3 +60,5 @@ Integration tests (`backend/tests/api_integration_test.rs`) connect to `DATABASE
 - When changing a request or response shape, update all three: the Rust struct (`models.rs` or the route module), `mobile/src/api/types.ts`, and the payload type in `mobile/src/api/client.ts`. `npm run typecheck` then flags each screen that uses the old shape.
 - Never send vault values to a third-party service. The Wi-Fi QR in `vault.tsx` is rendered on-device with `react-native-qrcode-svg` for this reason.
 - There is no `expenses` feature. Migration `0003_bills.sql` dropped it in favour of `household_bills`.
+- Migrations must be expand-only (add tables, nullable columns, and indexes; renames and drops go in a later release). Rolling back to the previous image must keep working against the new schema.
+- This repo is treated as public. Never commit host addresses, SSH users, tunnel IDs or tokens, or `.env` values. Production secrets live only in the host's `~/homesy/.env` and in GitHub secrets.

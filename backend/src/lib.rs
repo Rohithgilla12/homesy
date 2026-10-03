@@ -6,10 +6,18 @@ pub mod models;
 pub mod routes;
 pub mod state;
 
-use axum::{routing::get, Router};
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use axum::{
+    http::{header, HeaderValue, Method},
+    routing::get,
+    Router,
+};
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    trace::TraceLayer,
+};
 
-pub fn create_app(state: state::AppState) -> Router {
+/// Builds the router. `cors_origins` comes from `CORS_ORIGINS`; `None` allows any origin (local development).
+pub fn create_app(state: state::AppState, cors_origins: Option<&[String]>) -> Router {
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .merge(routes::auth::router())
@@ -18,7 +26,20 @@ pub fn create_app(state: state::AppState) -> Router {
         .merge(routes::vault::router())
         .merge(routes::bulletin::router())
         .merge(routes::bills::router())
-        .layer(CorsLayer::permissive()) // tighten before prod
+        .layer(cors_layer(cors_origins))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+fn cors_layer(origins: Option<&[String]>) -> CorsLayer {
+    let Some(origins) = origins else {
+        return CorsLayer::permissive();
+    };
+    let origins = origins
+        .iter()
+        .map(|o| HeaderValue::from_str(o).expect("origins are validated by config::parse_origins"));
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list(origins))
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
 }

@@ -35,7 +35,7 @@ async fn parse_json_response(body: Body) -> Value {
 #[tokio::test]
 async fn test_full_api_flow() {
     let (_pool, state) = setup_test_db().await;
-    let app = create_app(state);
+    let app = create_app(state, None);
 
     // 1. Health check
     let res = app
@@ -950,7 +950,7 @@ async fn test_sse_events_broadcast() {
 #[tokio::test]
 async fn test_bills_sse_events_and_ordering() {
     let (_pool, state) = setup_test_db().await;
-    let app = create_app(state.clone());
+    let app = create_app(state.clone(), None);
 
     // Setup user and home
     let u_email = format!("bill_user_{}@example.com", Uuid::now_v7());
@@ -1115,4 +1115,69 @@ async fn test_bills_sse_events_and_ordering() {
         .await
         .unwrap();
     assert_eq!(del_res2.status(), StatusCode::OK);
+}
+
+/// State whose pool never connects. Enough for routes that do not touch the database.
+fn unconnected_state() -> AppState {
+    let pool = PgPoolOptions::new()
+        .connect_lazy("postgres://homesy:homesy@127.0.0.1:1/homesy")
+        .unwrap();
+    AppState::new(pool, "test-jwt-secret-for-api-tests-123".into())
+}
+
+fn preflight(origin: &str, method: &str) -> Request<Body> {
+    Request::builder()
+        .method("OPTIONS")
+        .uri("/items/00000000-0000-0000-0000-000000000000")
+        .header(header::ORIGIN, origin)
+        .header(header::ACCESS_CONTROL_REQUEST_METHOD, method)
+        .header(
+            header::ACCESS_CONTROL_REQUEST_HEADERS,
+            "authorization,content-type",
+        )
+        .body(Body::empty())
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_cors_allows_preflight_from_listed_origin() {
+    let origins = vec!["https://app.homesy.gilla.fun".to_string()];
+    let app = create_app(unconnected_state(), Some(&origins));
+
+    for method in ["PATCH", "DELETE"] {
+        let res = app
+            .clone()
+            .oneshot(preflight("https://app.homesy.gilla.fun", method))
+            .await
+            .unwrap();
+        let headers = res.headers();
+        assert_eq!(
+            headers[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "https://app.homesy.gilla.fun"
+        );
+        assert!(headers[header::ACCESS_CONTROL_ALLOW_METHODS]
+            .to_str()
+            .unwrap()
+            .contains(method));
+        let allowed = headers[header::ACCESS_CONTROL_ALLOW_HEADERS]
+            .to_str()
+            .unwrap()
+            .to_lowercase();
+        assert!(allowed.contains("authorization") && allowed.contains("content-type"));
+    }
+}
+
+#[tokio::test]
+async fn test_cors_rejects_unlisted_origin() {
+    let origins = vec!["https://app.homesy.gilla.fun".to_string()];
+    let app = create_app(unconnected_state(), Some(&origins));
+
+    let res = app
+        .oneshot(preflight("https://evil.example", "PATCH"))
+        .await
+        .unwrap();
+    assert!(res
+        .headers()
+        .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+        .is_none());
 }

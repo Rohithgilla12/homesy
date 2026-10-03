@@ -18,7 +18,7 @@ async fn main() -> anyhow::Result<()> {
     sqlx::migrate!("./migrations").run(&pool).await?;
 
     let state = state::AppState::new(pool, cfg.jwt_secret.clone());
-    let app = create_app(state);
+    let app = create_app(state, cfg.cors_origins.as_deref());
 
     let addr = format!("0.0.0.0:{}", cfg.port);
     tracing::info!("homesy-api listening on {addr}");

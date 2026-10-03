@@ -36,6 +36,8 @@ test_backs_up_rotates_and_deploys() {
   [ ! -e "$work/backups/predeploy-20260101T000000Z.sql.gz" ] || fail "oldest backup not rotated out"
   grep -q '^compose pull homesy-api$' "$work/calls" || fail "no compose pull"
   grep -q '^compose up -d$' "$work/calls" || fail "no compose up"
+  grep -q '^image prune -f --filter label=org.opencontainers.image.source=https://github.com/Rohithgilla12/homesy$' "$work/calls" \
+    || fail "superseded homesy images not pruned"
 }
 
 test_failed_dump_aborts_before_touching_containers() {

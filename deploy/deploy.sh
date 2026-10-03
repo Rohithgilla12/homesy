@@ -23,4 +23,7 @@ fi
 
 docker compose pull homesy-api
 docker compose up -d
+# The host's disk is tight: drop homesy images that :latest no longer points at (rollback pulls :<sha> from GHCR).
+docker image prune -f --filter label=org.opencontainers.image.source=https://github.com/Rohithgilla12/homesy \
+  || echo "WARNING: image prune failed; deploy itself succeeded" >&2
 docker inspect -f 'running {{.Config.Image}} ({{.Image}})' homesy-api

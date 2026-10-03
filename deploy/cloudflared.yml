@@ -1,5 +1,5 @@
 # Ingress for the homesy tunnel. The tunnel itself is identified by TUNNEL_TOKEN, which lives only in the host .env.
 ingress:
-  - hostname: api.homesy.gilla.fun
+  - hostname: homesy-api.gilla.fun
     service: http://homesy-api:8080
   - service: http_status:404

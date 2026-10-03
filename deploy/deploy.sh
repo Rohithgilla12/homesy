@@ -6,7 +6,10 @@ cd "$(dirname "$0")"
 
 keep=5
 mkdir -p backups
-trap 'rm -f backups/.predeploy-*.partial' EXIT
+# The image is public. Pull it with an empty docker config so host-wide ghcr.io credentials,
+# which belong to other projects and may lack package scope, can't get the pull denied.
+anon_config=$(mktemp -d)
+trap 'rm -f backups/.predeploy-*.partial; rm -rf "$anon_config"' EXIT
 
 if grep -Eq '^HOMESY_IMAGE=.+' .env 2>/dev/null && ! grep -Eq '^HOMESY_IMAGE=.*:latest$' .env; then
   echo "WARNING: .env pins HOMESY_IMAGE to a fixed tag; this deploy will not pick up the new :latest image" >&2
@@ -21,7 +24,7 @@ if [ "$(docker inspect -f '{{.State.Running}}' homesy-postgres 2>/dev/null || tr
   echo "pre-deploy backup: backups/predeploy-$ts.sql.gz"
 fi
 
-docker compose pull homesy-api
+DOCKER_CONFIG="$anon_config" docker compose pull homesy-api
 docker compose up -d
 # The host's disk is tight: drop homesy images that :latest no longer points at (rollback pulls :<sha> from GHCR).
 docker image prune -f --filter label=org.opencontainers.image.source=https://github.com/Rohithgilla12/homesy \

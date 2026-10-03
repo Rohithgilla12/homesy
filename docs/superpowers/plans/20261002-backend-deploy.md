@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Serve the Homesy API at `https://api.homesy.gilla.fun` from the shared arm64 host. Every push to `main` that touches `backend/` should be tested, built, deployed, and smoke-tested automatically.
+**Goal:** Serve the Homesy API at `https://homesy-api.gilla.fun` from the shared arm64 host. Every push to `main` that touches `backend/` should be tested, built, deployed, and smoke-tested automatically.
 
 **Architecture:** The API gets four small changes: configurable CORS, a `/health` that pings the DB, graceful shutdown, and a Dockerfile. GitHub Actions tests on x64, builds a native arm64 image on `ubuntu-24.04-arm`, pushes it to GHCR, then SSHes to the host with a key restricted to one forced command. That command runs `deploy.sh`, which takes a pre-deploy `pg_dump` and then runs `docker compose pull && up -d`. A compose project on the host runs Postgres, the API, and a dedicated Cloudflare Tunnel connector. Nothing listens on a host port.
 
@@ -20,7 +20,7 @@
 - Postgres image: `postgres:16-alpine`. API image: `ghcr.io/rohithgilla12/homesy-api`, tagged `:<short-sha>` and `:latest`.
 - API limits: `cpus: 1.0`, `mem_limit: 512m`. Logging on every service: `json-file`, `max-size: 10m`, `max-file: 3`.
 - `homesy-api` and `homesy-postgres` carry the label `com.centurylinklabs.watchtower.enable=false`.
-- Production env: `CORS_ORIGINS=https://app.homesy.gilla.fun` and `RUST_LOG=homesy_api=info,tower_http=info`.
+- Production env: `CORS_ORIGINS=https://homesy-app.gilla.fun` and `RUST_LOG=homesy_api=info,tower_http=info`.
 - Keep the last 5 pre-deploy backups.
 - **Migrations are expand-only.** Add tables, nullable columns, and indexes; renames and drops ship in a later release.
 - No `// ====` banner comments. Match the surrounding comment density.
@@ -36,7 +36,7 @@
 
 ## Review Focus
 
-1. **`CORS_ORIGINS` with a trailing slash or no scheme** (for example `https://app.homesy.gilla.fun/`). The API must refuse to start with a clear error, not boot and silently block the web app. Pinned by tests in Task 2.
+1. **`CORS_ORIGINS` with a trailing slash or no scheme** (for example `https://homesy-app.gilla.fun/`). The API must refuse to start with a clear error, not boot and silently block the web app. Pinned by tests in Task 2.
 2. **A browser preflight for `PATCH`/`DELETE` with an `Authorization` header from the allowed origin.** It must succeed, because the web app edits items and vault entries this way. Pinned by an integration test in Task 2.
 3. **The database is unreachable or hangs.** `/health` must answer `503` within seconds, not hang until the 30-second pool timeout, so CI and Gatus report it correctly. Pinned by an integration test in Task 3.
 4. **`pg_dump` fails during a deploy.** The deploy must abort before touching containers. It must leave no truncated backup that would rotate a good one out. Pinned by `deploy/test_deploy.sh` in Task 6.
@@ -119,19 +119,19 @@ mod tests {
 
     #[test]
     fn parses_and_trims_a_comma_separated_list() {
-        let origins = parse_origins(" https://app.homesy.gilla.fun , http://localhost:8081 ").unwrap();
-        assert_eq!(origins, vec!["https://app.homesy.gilla.fun", "http://localhost:8081"]);
+        let origins = parse_origins(" https://homesy-app.gilla.fun , http://localhost:8081 ").unwrap();
+        assert_eq!(origins, vec!["https://homesy-app.gilla.fun", "http://localhost:8081"]);
     }
 
     #[test]
     fn rejects_a_trailing_slash() {
         // Browsers never send a trailing slash in Origin, so this entry would silently match nothing.
-        assert!(parse_origins("https://app.homesy.gilla.fun/").is_err());
+        assert!(parse_origins("https://homesy-app.gilla.fun/").is_err());
     }
 
     #[test]
     fn rejects_a_missing_scheme() {
-        assert!(parse_origins("app.homesy.gilla.fun").is_err());
+        assert!(parse_origins("homesy-app.gilla.fun").is_err());
     }
 
     #[test]
@@ -236,13 +236,13 @@ fn preflight(origin: &str, method: &str) -> Request<Body> {
 
 #[tokio::test]
 async fn test_cors_allows_preflight_from_listed_origin() {
-    let origins = vec!["https://app.homesy.gilla.fun".to_string()];
+    let origins = vec!["https://homesy-app.gilla.fun".to_string()];
     let app = create_app(unconnected_state(), Some(&origins));
 
     for method in ["PATCH", "DELETE"] {
-        let res = app.clone().oneshot(preflight("https://app.homesy.gilla.fun", method)).await.unwrap();
+        let res = app.clone().oneshot(preflight("https://homesy-app.gilla.fun", method)).await.unwrap();
         let headers = res.headers();
-        assert_eq!(headers[header::ACCESS_CONTROL_ALLOW_ORIGIN], "https://app.homesy.gilla.fun");
+        assert_eq!(headers[header::ACCESS_CONTROL_ALLOW_ORIGIN], "https://homesy-app.gilla.fun");
         assert!(headers[header::ACCESS_CONTROL_ALLOW_METHODS].to_str().unwrap().contains(method));
         let allowed = headers[header::ACCESS_CONTROL_ALLOW_HEADERS].to_str().unwrap().to_lowercase();
         assert!(allowed.contains("authorization") && allowed.contains("content-type"));
@@ -251,7 +251,7 @@ async fn test_cors_allows_preflight_from_listed_origin() {
 
 #[tokio::test]
 async fn test_cors_rejects_unlisted_origin() {
-    let origins = vec!["https://app.homesy.gilla.fun".to_string()];
+    let origins = vec!["https://homesy-app.gilla.fun".to_string()];
     let app = create_app(unconnected_state(), Some(&origins));
 
     let res = app.oneshot(preflight("https://evil.example", "PATCH")).await.unwrap();
@@ -581,7 +581,7 @@ The local DB must be up (`docker compose up -d`).
 ```bash
 docker run -d --name homesy-api-smoke -p 18080:8080 \
   -e DATABASE_URL=postgres://homesy:homesy@host.docker.internal:5432/homesy \
-  -e JWT_SECRET=local-smoke-secret -e CORS_ORIGINS=https://app.homesy.gilla.fun \
+  -e JWT_SECRET=local-smoke-secret -e CORS_ORIGINS=https://homesy-app.gilla.fun \
   homesy-api:local
 sleep 3 && curl -fsS localhost:18080/health && echo
 time docker stop homesy-api-smoke && docker logs homesy-api-smoke 2>&1 | tail -3
@@ -597,7 +597,7 @@ Expected:
 
 ```bash
 docker run --rm -e DATABASE_URL=postgres://x@127.0.0.1:1/x -e JWT_SECRET=x \
-  -e CORS_ORIGINS=https://app.homesy.gilla.fun/ homesy-api:local; echo "exit=$?"
+  -e CORS_ORIGINS=https://homesy-app.gilla.fun/ homesy-api:local; echo "exit=$?"
 ```
 
 Expected: an error mentioning `no path or trailing slash`, and `exit=1`.
@@ -756,7 +756,7 @@ Expected: five `ok   test_*` lines, and shellcheck prints nothing. `-S warning` 
 ```yaml
 # Ingress for the homesy tunnel. The tunnel itself is identified by TUNNEL_TOKEN, which lives only in the host .env.
 ingress:
-  - hostname: api.homesy.gilla.fun
+  - hostname: homesy-api.gilla.fun
     service: http://homesy-api:8080
   - service: http_status:404
 ```
@@ -765,7 +765,7 @@ Validate:
 
 ```bash
 cloudflared tunnel --config deploy/cloudflared.yml ingress validate
-cloudflared tunnel --config deploy/cloudflared.yml ingress rule https://api.homesy.gilla.fun/health
+cloudflared tunnel --config deploy/cloudflared.yml ingress rule https://homesy-api.gilla.fun/health
 ```
 
 Expected: `OK`, then `Matched rule #0` showing `service: http://homesy-api:8080`.
@@ -865,7 +865,7 @@ Expected: an error containing `CORS_ORIGINS is required`, and `exit=1`.
 `-p homesy-smoke` is mandatory. The local dev compose project is also named `homesy`, and reusing that name would tear down the dev database.
 
 ```bash
-printf 'POSTGRES_PASSWORD=smoke\nJWT_SECRET=smoke\nTUNNEL_TOKEN=unused\nCORS_ORIGINS=https://app.homesy.gilla.fun\nHOMESY_IMAGE=homesy-api:local\n' > "$SMOKE/.env"
+printf 'POSTGRES_PASSWORD=smoke\nJWT_SECRET=smoke\nTUNNEL_TOKEN=unused\nCORS_ORIGINS=https://homesy-app.gilla.fun\nHOMESY_IMAGE=homesy-api:local\n' > "$SMOKE/.env"
 cd "$SMOKE"
 sed -i '' 's/name: homesy-pgdata/name: homesy-smoke-pgdata/; s/name: homesy-internal/name: homesy-smoke-internal/' compose.yml
 sed -i '' 's/container_name: homesy-/container_name: homesy-smoke-/' compose.yml
@@ -1004,7 +1004,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: production
-      url: https://api.homesy.gilla.fun
+      url: https://homesy-api.gilla.fun
     steps:
       - name: Configure SSH
         env:
@@ -1025,7 +1025,7 @@ jobs:
       - name: Smoke test
         run: |
           for attempt in 1 2 3 4 5; do
-            if curl --max-time 8 -fsS https://api.homesy.gilla.fun/health; then echo; exit 0; fi
+            if curl --max-time 8 -fsS https://homesy-api.gilla.fun/health; then echo; exit 0; fi
             echo "attempt $attempt failed; retrying in 5s"
             sleep 5
           done
@@ -1067,7 +1067,7 @@ runner, push to GHCR, deploy via the forced-command SSH key and smoke-test
 ````markdown
 # Deploying the Homesy API
 
-Production is `https://api.homesy.gilla.fun`. It is one compose stack (`deploy/compose.prod.yml`) on a shared arm64 host, reached only through a Cloudflare Tunnel; the host exposes no ports. Host access details are kept outside this repository.
+Production is `https://homesy-api.gilla.fun`. It is one compose stack (`deploy/compose.prod.yml`) on a shared arm64 host, reached only through a Cloudflare Tunnel; the host exposes no ports. Host access details are kept outside this repository.
 
 ## How a deploy happens
 
@@ -1093,7 +1093,7 @@ Changes to `deploy/compose.prod.yml`, `deploy/cloudflared.yml`, or `deploy/deplo
 ## Rollback
 
 1. In `~/homesy/.env`, set `HOMESY_IMAGE=ghcr.io/rohithgilla12/homesy-api:<good-sha>`.
-2. Run `~/homesy/deploy.sh` and check `curl -fsS https://api.homesy.gilla.fun/health`.
+2. Run `~/homesy/deploy.sh` and check `curl -fsS https://homesy-api.gilla.fun/health`.
 3. Once a fix ships, set `HOMESY_IMAGE` back to `:latest`. While it is pinned, every CI deploy pulls the pinned tag and changes nothing. `deploy.sh` warns about this.
 
 ## Migrations
@@ -1126,7 +1126,7 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings   # what CI enfor
 
 ```markdown
 - **CORS** is permissive unless `CORS_ORIGINS` is set (comma-separated `scheme://host[:port]`, validated at startup). Production sets it to the web app origin.
-- **Deployment:** merging backend changes to `main` tests, builds an arm64 image, and deploys it to `https://api.homesy.gilla.fun` (see `DEPLOY.md`). The API runs as a single instance, which the in-process SSE broadcast requires. `/health` pings the database and returns 503 within about 2 s when it is down.
+- **Deployment:** merging backend changes to `main` tests, builds an arm64 image, and deploys it to `https://homesy-api.gilla.fun` (see `DEPLOY.md`). The API runs as a single instance, which the in-process SSE broadcast requires. `/health` pings the database and returns 503 within about 2 s when it is down.
 ```
 
 3. In "Conventions and gotchas", append:
@@ -1162,7 +1162,7 @@ Fill in the real values at execution time. They exist only in this file.
 ````markdown
 ---
 name: deploy-homesy
-description: Operate the Homesy API in production (api.homesy.gilla.fun) on the shared arm64 host — manual deploys, rollback, logs, restores, tunnel and Gatus checks. Use when asked to deploy, roll back, debug, or inspect production Homesy.
+description: Operate the Homesy API in production (homesy-api.gilla.fun) on the shared arm64 host — manual deploys, rollback, logs, restores, tunnel and Gatus checks. Use when asked to deploy, roll back, debug, or inspect production Homesy.
 ---
 
 # Homesy production
@@ -1174,7 +1174,7 @@ Normal deploys happen in CI when backend changes merge to `main` (see the repo's
 | SSH | `export HOMESY_SSH=<user@host>` (same host as Openmind; see the deploy-openmind skill) |
 | Stack dir | `~/homesy` (compose.yml, cloudflared.yml, deploy.sh, .env, backups/) |
 | Containers | homesy-postgres, homesy-api, homesy-cloudflared |
-| Tunnel | `homesy`, id `<tunnel-id>`, route `api.homesy.gilla.fun` to `http://homesy-api:8080` |
+| Tunnel | `homesy`, id `<tunnel-id>`, route `homesy-api.gilla.fun` to `http://homesy-api:8080` |
 | CI deploy key | `homesy-ci-deploy`, fingerprint `<fingerprint>`, forced command `~/homesy/deploy.sh` |
 | Gatus | endpoint `homesy-api` in `~/gatus/config/config.yaml` |
 
@@ -1221,7 +1221,7 @@ ssh "$HOMESY_SSH" 'chmod 755 ~/homesy/deploy.sh && ls -la ~/homesy'
 ssh "$HOMESY_SSH" 'cd ~/homesy && test ! -e .env && umask 077 && {
   echo "POSTGRES_PASSWORD=$(openssl rand -hex 32)"
   echo "JWT_SECRET=$(openssl rand -hex 32)"
-  echo "CORS_ORIGINS=https://app.homesy.gilla.fun"
+  echo "CORS_ORIGINS=https://homesy-app.gilla.fun"
   echo "RUST_LOG=homesy_api=info,tower_http=info"
   echo "HOMESY_IMAGE=ghcr.io/rohithgilla12/homesy-api:latest"
 } > .env && stat -c "%a %n" .env && cut -d= -f1 .env'
@@ -1254,7 +1254,7 @@ Expected after Task 13: `homesy-postgres`.
 
 **Interfaces:**
 - Consumes: `~/homesy/.env` (Task 10)
-- Produces: tunnel `homesy`, the DNS record `api.homesy.gilla.fun` as a CNAME to the tunnel, and `TUNNEL_TOKEN` in the host `.env`
+- Produces: tunnel `homesy`, the DNS record `homesy-api.gilla.fun` as a CNAME to the tunnel, and `TUNNEL_TOKEN` in the host `.env`
 
 - [ ] **Step 1: Authorise cloudflared for the zone (owner clicks once)**
 
@@ -1265,11 +1265,11 @@ The owner picks `gilla.fun` in the browser. Expected: `~/.cloudflared/cert.pem` 
 
 ```bash
 cloudflared tunnel create homesy
-cloudflared tunnel route dns homesy api.homesy.gilla.fun
+cloudflared tunnel route dns homesy homesy-api.gilla.fun
 cloudflared tunnel list | grep homesy
 ```
 
-Expected: the tunnel ID is printed (record it in the Task 9 skill only). The route reports a CNAME for `api.homesy.gilla.fun`.
+Expected: the tunnel ID is printed (record it in the Task 9 skill only). The route reports a CNAME for `homesy-api.gilla.fun`.
 
 - [ ] **Step 3: Put the token on the host without printing it**
 
@@ -1281,7 +1281,7 @@ Expected: six key names, now including `TUNNEL_TOKEN`.
 
 - [ ] **Step 4: Verify DNS**
 
-Run: `dig +short api.homesy.gilla.fun`
+Run: `dig +short homesy-api.gilla.fun`
 Expected: Cloudflare edge IPs. The hostname returns `530` until the connector starts in Task 13, which is expected at this point.
 
 ---
@@ -1348,13 +1348,13 @@ Expected: `0`
 
 **Interfaces:**
 - Consumes: the branch from Tasks 1–8 and the setup from Tasks 10–12
-- Produces: a live `https://api.homesy.gilla.fun`
+- Produces: a live `https://homesy-api.gilla.fun`
 
 - [ ] **Step 1: Push the branch and open a PR**
 
 ```bash
 git push -u origin feat/backend-deploy
-gh pr create --fill --title "Deploy the backend to api.homesy.gilla.fun"
+gh pr create --fill --title "Deploy the backend to homesy-api.gilla.fun"
 gh pr checks --watch
 ```
 
@@ -1392,7 +1392,7 @@ Expected: all three containers are `Up` (Postgres shows `(healthy)`), and the tu
 Neither available credential can edit firewall rules. Either the owner adds the rule in the dashboard (gilla.fun → Security → WAF → Rate limiting rules → Create rule), or the owner creates an API token with only `Zone → Zone WAF → Edit` on `gilla.fun`, stored in 1Password, and Claude applies the same rule through the Rulesets API.
 
 - Name: `homesy auth`
-- Expression: `(http.host eq "api.homesy.gilla.fun" and starts_with(http.request.uri.path, "/auth/"))`
+- Expression: `(http.host eq "homesy-api.gilla.fun" and starts_with(http.request.uri.path, "/auth/"))`
 - Characteristics: IP
 - Rate: 5 requests per 10 seconds on the free plan (10 per 60 s if the plan allows)
 - Action: Block, for 10 seconds (the free plan's only duration)
@@ -1403,7 +1403,7 @@ If the zone's single free-plan rule slot is already taken by another project, st
 
 ```bash
 for i in $(seq 1 15); do
-  curl -s -o /dev/null -w "%{http_code} " -X POST https://api.homesy.gilla.fun/auth/login \
+  curl -s -o /dev/null -w "%{http_code} " -X POST https://homesy-api.gilla.fun/auth/login \
     -H 'content-type: application/json' -d '{"email":"ratelimit-probe@homesy.test","password":"not-a-real-password"}'
 done; echo
 ```
@@ -1423,10 +1423,10 @@ anchor = '    alerts: [{ type: ntfy, description: "runstamp-api.gilla.fun is dow
 block = anchor + '''
   - name: homesy-api
     group: apps
-    url: "https://api.homesy.gilla.fun/health"
+    url: "https://homesy-api.gilla.fun/health"
     interval: 5m
     conditions: ["[STATUS] == 200", "[RESPONSE_TIME] < 5000"]
-    alerts: [{ type: ntfy, description: "api.homesy.gilla.fun is down" }]
+    alerts: [{ type: ntfy, description: "homesy-api.gilla.fun is down" }]
 '''
 assert s.count(anchor) == 1, "anchor not found exactly once"
 p.write_text(s.replace(anchor, block))
@@ -1454,7 +1454,7 @@ Expected: a config reload or a `homesy-api` health result. If Gatus does not hot
 - [ ] **Step 1: Health and auth end to end**
 
 ```bash
-API=https://api.homesy.gilla.fun
+API=https://homesy-api.gilla.fun
 curl -fsS $API/health; echo
 EMAIL="smoke+$(date +%s)@homesy.test"
 TOKEN=$(curl -fsS -X POST $API/auth/signup -H 'content-type: application/json' \
@@ -1491,7 +1491,7 @@ Expected: `homesy-api` memory is under its 512 MiB limit. The first CI deploy ra
 ```bash
 SHA=$(gh run list --workflow api.yml --branch main --limit 1 --json headSha -q '.[0].headSha' | cut -c1-7)
 ssh "$HOMESY_SSH" "cd ~/homesy && sed -i 's|^HOMESY_IMAGE=.*|HOMESY_IMAGE=ghcr.io/rohithgilla12/homesy-api:$SHA|' .env && ./deploy.sh"
-curl -fsS https://api.homesy.gilla.fun/health; echo
+curl -fsS https://homesy-api.gilla.fun/health; echo
 ssh "$HOMESY_SSH" "cd ~/homesy && sed -i 's|^HOMESY_IMAGE=.*|HOMESY_IMAGE=ghcr.io/rohithgilla12/homesy-api:latest|' .env && ./deploy.sh"
 ```
 

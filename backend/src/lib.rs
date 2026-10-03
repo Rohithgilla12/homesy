@@ -64,5 +64,10 @@ fn cors_layer(origins: Option<&[String]>) -> CorsLayer {
     CorsLayer::new()
         .allow_origin(AllowOrigin::list(origins))
         .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
-        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+        // The web SSE client sends Cache-Control, which is not CORS-safelisted.
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            header::CACHE_CONTROL,
+        ])
 }

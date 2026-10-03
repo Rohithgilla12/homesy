@@ -1133,7 +1133,8 @@ fn preflight(origin: &str, method: &str) -> Request<Body> {
         .header(header::ACCESS_CONTROL_REQUEST_METHOD, method)
         .header(
             header::ACCESS_CONTROL_REQUEST_HEADERS,
-            "authorization,content-type",
+            // What the web SSE client sends (mobile/src/api/events.ts).
+            "authorization,content-type,cache-control",
         )
         .body(Body::empty())
         .unwrap()
@@ -1163,7 +1164,12 @@ async fn test_cors_allows_preflight_from_listed_origin() {
             .to_str()
             .unwrap()
             .to_lowercase();
-        assert!(allowed.contains("authorization") && allowed.contains("content-type"));
+        for h in ["authorization", "content-type", "cache-control"] {
+            assert!(
+                allowed.contains(h),
+                "preflight must allow {h}, got {allowed}"
+            );
+        }
     }
 }
 

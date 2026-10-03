@@ -15,8 +15,14 @@ use uuid::Uuid;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/homes/{home_id}/vault", get(list_entries).post(create_entry))
-        .route("/vault/{entry_id}", patch(update_entry).delete(delete_entry))
+        .route(
+            "/homes/{home_id}/vault",
+            get(list_entries).post(create_entry),
+        )
+        .route(
+            "/vault/{entry_id}",
+            patch(update_entry).delete(delete_entry),
+        )
 }
 
 const COLS: &str = "id, home_id, category, label, value, is_secret, pinned, created_by, updated_at";
@@ -46,7 +52,9 @@ fn check_category(c: &str) -> AppResult<()> {
     if CATEGORIES.contains(&c) {
         Ok(())
     } else {
-        Err(AppError::BadRequest(format!("category must be one of {CATEGORIES:?}")))
+        Err(AppError::BadRequest(format!(
+            "category must be one of {CATEGORIES:?}"
+        )))
     }
 }
 
@@ -115,7 +123,8 @@ async fn create_entry(
         "created",
         "vault",
         &format!("Created vault entry \"{}\"", row.label),
-    ).await;
+    )
+    .await;
 
     Ok(Json(row))
 }
@@ -162,7 +171,8 @@ async fn update_entry(
         "updated",
         "vault",
         &format!("Updated vault entry \"{}\"", row.label),
-    ).await;
+    )
+    .await;
 
     Ok(Json(row))
 }
@@ -174,12 +184,16 @@ async fn delete_entry(
 ) -> AppResult<Json<serde_json::Value>> {
     let home_id = entry_home(&s.pool, uid, entry_id).await?;
 
-    let existing: Option<(String,)> = sqlx::query_as("select label from vault_entries where id = $1")
-        .bind(entry_id)
-        .fetch_optional(&s.pool)
-        .await?;
+    let existing: Option<(String,)> =
+        sqlx::query_as("select label from vault_entries where id = $1")
+            .bind(entry_id)
+            .fetch_optional(&s.pool)
+            .await?;
 
-    sqlx::query("delete from vault_entries where id = $1").bind(entry_id).execute(&s.pool).await?;
+    sqlx::query("delete from vault_entries where id = $1")
+        .bind(entry_id)
+        .execute(&s.pool)
+        .await?;
 
     s.broadcast(crate::models::HomeEvent {
         home_id,
@@ -191,15 +205,7 @@ async fn delete_entry(
         Some((lbl,)) => format!("Deleted vault entry \"{}\"", lbl),
         None => "Deleted vault entry".to_string(),
     };
-    log_activity(
-        &s,
-        home_id,
-        uid,
-        "deleted",
-        "vault",
-        &desc,
-    ).await;
+    log_activity(&s, home_id, uid, "deleted", "vault", &desc).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
-

@@ -25,4 +25,3 @@ impl AppState {
         let _ = self.events_tx.send(event);
     }
 }
-

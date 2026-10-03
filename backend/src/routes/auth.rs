@@ -4,7 +4,11 @@ use crate::{
     models::User,
     state::AppState,
 };
-use axum::{extract::State, routing::{get, post}, Json, Router};
+use axum::{
+    extract::State,
+    routing::{get, post},
+    Json, Router,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -36,13 +40,18 @@ struct AuthResponse {
 
 const USER_COLS: &str = "id, email, display_name, created_at";
 
-async fn signup(State(s): State<AppState>, Json(b): Json<SignupBody>) -> AppResult<Json<AuthResponse>> {
+async fn signup(
+    State(s): State<AppState>,
+    Json(b): Json<SignupBody>,
+) -> AppResult<Json<AuthResponse>> {
     let email = b.email.trim().to_lowercase();
     if !email.contains('@') {
         return Err(AppError::BadRequest("invalid email".into()));
     }
     if b.password.len() < 8 {
-        return Err(AppError::BadRequest("password must be at least 8 characters".into()));
+        return Err(AppError::BadRequest(
+            "password must be at least 8 characters".into(),
+        ));
     }
     let name = b.display_name.trim();
     if name.is_empty() {
@@ -73,7 +82,10 @@ async fn signup(State(s): State<AppState>, Json(b): Json<SignupBody>) -> AppResu
     Ok(Json(AuthResponse { token, user }))
 }
 
-async fn login(State(s): State<AppState>, Json(b): Json<LoginBody>) -> AppResult<Json<AuthResponse>> {
+async fn login(
+    State(s): State<AppState>,
+    Json(b): Json<LoginBody>,
+) -> AppResult<Json<AuthResponse>> {
     let email = b.email.trim().to_lowercase();
     let row: Option<(Uuid, String)> =
         sqlx::query_as("select id, password_hash from users where email = $1")

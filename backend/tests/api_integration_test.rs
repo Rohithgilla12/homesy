@@ -35,7 +35,7 @@ async fn parse_json_response(body: Body) -> Value {
 #[tokio::test]
 async fn test_full_api_flow() {
     let (_pool, state) = setup_test_db().await;
-    let app = create_app(state);
+    let app = create_app(state, None);
 
     // 1. Health check
     let res = app
@@ -425,7 +425,10 @@ async fn test_full_api_flow() {
         )
         .await
         .unwrap();
-    let c1_id = parse_json_response(c1_res.into_body()).await["id"].as_str().unwrap().to_string();
+    let c1_id = parse_json_response(c1_res.into_body()).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let _ = app
         .clone()
@@ -435,9 +438,7 @@ async fn test_full_api_flow() {
                 .uri(format!("/items/{c1_id}"))
                 .header(header::AUTHORIZATION, format!("Bearer {u1_token}"))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({ "done": true }).to_string(),
-                ))
+                .body(Body::from(json!({ "done": true }).to_string()))
                 .unwrap(),
         )
         .await
@@ -949,7 +950,7 @@ async fn test_sse_events_broadcast() {
 #[tokio::test]
 async fn test_bills_sse_events_and_ordering() {
     let (_pool, state) = setup_test_db().await;
-    let app = create_app(state.clone());
+    let app = create_app(state.clone(), None);
 
     // Setup user and home
     let u_email = format!("bill_user_{}@example.com", Uuid::now_v7());
@@ -1083,7 +1084,8 @@ async fn test_bills_sse_events_and_ordering() {
 
     let event_a = rx.recv().await.unwrap();
     let event_b = rx.recv().await.unwrap();
-    let has_unpaid_event = event_a.event_type == "bill_unpaid" || event_b.event_type == "bill_unpaid";
+    let has_unpaid_event =
+        event_a.event_type == "bill_unpaid" || event_b.event_type == "bill_unpaid";
     assert!(has_unpaid_event, "Should receive bill_unpaid SSE");
 
     // 4. Delete bill
@@ -1113,4 +1115,99 @@ async fn test_bills_sse_events_and_ordering() {
         .await
         .unwrap();
     assert_eq!(del_res2.status(), StatusCode::OK);
+}
+
+/// State whose pool never connects. Enough for routes that do not touch the database.
+fn unconnected_state() -> AppState {
+    let pool = PgPoolOptions::new()
+        .connect_lazy("postgres://homesy:homesy@127.0.0.1:1/homesy")
+        .unwrap();
+    AppState::new(pool, "test-jwt-secret-for-api-tests-123".into())
+}
+
+fn preflight(origin: &str, method: &str) -> Request<Body> {
+    Request::builder()
+        .method("OPTIONS")
+        .uri("/items/00000000-0000-0000-0000-000000000000")
+        .header(header::ORIGIN, origin)
+        .header(header::ACCESS_CONTROL_REQUEST_METHOD, method)
+        .header(
+            header::ACCESS_CONTROL_REQUEST_HEADERS,
+            // What the web SSE client sends (mobile/src/api/events.ts).
+            "authorization,content-type,cache-control",
+        )
+        .body(Body::empty())
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_cors_allows_preflight_from_listed_origin() {
+    let origins = vec!["https://app.homesy.gilla.fun".to_string()];
+    let app = create_app(unconnected_state(), Some(&origins));
+
+    for method in ["PATCH", "DELETE"] {
+        let res = app
+            .clone()
+            .oneshot(preflight("https://app.homesy.gilla.fun", method))
+            .await
+            .unwrap();
+        let headers = res.headers();
+        assert_eq!(
+            headers[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "https://app.homesy.gilla.fun"
+        );
+        assert!(headers[header::ACCESS_CONTROL_ALLOW_METHODS]
+            .to_str()
+            .unwrap()
+            .contains(method));
+        let allowed = headers[header::ACCESS_CONTROL_ALLOW_HEADERS]
+            .to_str()
+            .unwrap()
+            .to_lowercase();
+        for h in ["authorization", "content-type", "cache-control"] {
+            assert!(
+                allowed.contains(h),
+                "preflight must allow {h}, got {allowed}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_cors_rejects_unlisted_origin() {
+    let origins = vec!["https://app.homesy.gilla.fun".to_string()];
+    let app = create_app(unconnected_state(), Some(&origins));
+
+    let res = app
+        .oneshot(preflight("https://evil.example", "PATCH"))
+        .await
+        .unwrap();
+    assert!(res
+        .headers()
+        .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+        .is_none());
+}
+
+#[tokio::test]
+async fn test_health_reports_unreachable_database_promptly() {
+    let app = create_app(unconnected_state(), None);
+    let started = std::time::Instant::now();
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "health must not wait for the pool timeout"
+    );
+    let body = parse_json_response(res.into_body()).await;
+    assert_eq!(body["error"], "database unavailable");
 }

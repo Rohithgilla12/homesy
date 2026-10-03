@@ -110,7 +110,9 @@ async fn create_bill(
     }
     if let Some(amt) = b.amount_cents {
         if amt < 0 {
-            return Err(AppError::BadRequest("amount_cents cannot be negative".into()));
+            return Err(AppError::BadRequest(
+                "amount_cents cannot be negative".into(),
+            ));
         }
     }
 
@@ -119,17 +121,25 @@ async fn create_bill(
         "insert into household_bills (
             id, home_id, title, category, account_number, amount_cents,
             due_date, billing_period, is_paid, notes, created_by, created_at, updated_at
-        ) values ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $10, now(), now())"
+        ) values ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $10, now(), now())",
     )
     .bind(bill_id)
     .bind(home_id)
     .bind(title)
     .bind(category)
-    .bind(b.account_number.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()))
+    .bind(
+        b.account_number
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+    )
     .bind(b.amount_cents)
     .bind(b.due_date)
     .bind(billing_period)
-    .bind(b.notes.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()))
+    .bind(
+        b.notes
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+    )
     .bind(uid)
     .execute(&s.pool)
     .await?;
@@ -149,7 +159,8 @@ async fn create_bill(
         "created",
         "bill",
         &format!("Added bill \"{}\"", bill.title),
-    ).await;
+    )
+    .await;
 
     Ok(Json(bill))
 }
@@ -189,7 +200,9 @@ async fn update_bill(
         Some(p) => {
             let p = p.trim().to_string();
             if p.is_empty() {
-                return Err(AppError::BadRequest("billing_period cannot be empty".into()));
+                return Err(AppError::BadRequest(
+                    "billing_period cannot be empty".into(),
+                ));
             }
             p
         }
@@ -198,20 +211,30 @@ async fn update_bill(
 
     if let Some(amt) = b.amount_cents {
         if amt < 0 {
-            return Err(AppError::BadRequest("amount_cents cannot be negative".into()));
+            return Err(AppError::BadRequest(
+                "amount_cents cannot be negative".into(),
+            ));
         }
     }
 
-    let new_account_number = b.account_number.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).or(existing.account_number);
+    let new_account_number = b
+        .account_number
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or(existing.account_number);
     let new_amount_cents = b.amount_cents.or(existing.amount_cents);
     let new_due_date = b.due_date.or(existing.due_date);
-    let new_notes = b.notes.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).or(existing.notes);
+    let new_notes = b
+        .notes
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or(existing.notes);
 
     sqlx::query(
         "update household_bills
          set title = $1, category = $2, account_number = $3, amount_cents = $4,
              due_date = $5, billing_period = $6, notes = $7, updated_at = now()
-         where id = $8"
+         where id = $8",
     )
     .bind(&new_title)
     .bind(&new_category)
@@ -239,7 +262,8 @@ async fn update_bill(
         "updated",
         "bill",
         &format!("Updated bill \"{}\"", updated.title),
-    ).await;
+    )
+    .await;
 
     Ok(Json(updated))
 }
@@ -261,12 +285,18 @@ async fn pay_bill(
     }
     if let Some(amt) = b.amount_cents {
         if amt < 0 {
-            return Err(AppError::BadRequest("amount_cents cannot be negative".into()));
+            return Err(AppError::BadRequest(
+                "amount_cents cannot be negative".into(),
+            ));
         }
     }
 
     let new_amount_cents = b.amount_cents.or(existing.amount_cents);
-    let payment_ref = b.payment_ref.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).or(existing.payment_ref);
+    let payment_ref = b
+        .payment_ref
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or(existing.payment_ref);
 
     sqlx::query(
         "update household_bills
@@ -302,14 +332,7 @@ async fn pay_bill(
         updated.title
     );
 
-    log_activity(
-        &s,
-        home_id,
-        uid,
-        "paid",
-        "bill",
-        &desc,
-    ).await;
+    log_activity(&s, home_id, uid, "paid", "bill", &desc).await;
 
     s.broadcast(crate::models::HomeEvent {
         home_id,
@@ -331,7 +354,7 @@ async fn unpay_bill(
     sqlx::query(
         "update household_bills
          set is_paid = false, paid_by = null, paid_at = null, payment_ref = null, updated_at = now()
-         where id = $1"
+         where id = $1",
     )
     .bind(bill_id)
     .execute(&s.pool)
@@ -340,14 +363,7 @@ async fn unpay_bill(
     let updated = fetch_bill_with_names(&s.pool, bill_id).await?;
 
     let desc = format!("{user_name} marked {} as UNPAID", updated.title);
-    log_activity(
-        &s,
-        home_id,
-        uid,
-        "unpaid",
-        "bill",
-        &desc,
-    ).await;
+    log_activity(&s, home_id, uid, "unpaid", "bill", &desc).await;
 
     s.broadcast(crate::models::HomeEvent {
         home_id,
@@ -385,7 +401,7 @@ async fn new_cycle_bill(
              paid_at = null,
              payment_ref = null,
              updated_at = now()
-         where id = $4"
+         where id = $4",
     )
     .bind(billing_period)
     .bind(new_due_date)
@@ -403,8 +419,12 @@ async fn new_cycle_bill(
         uid,
         "new_cycle",
         "bill",
-        &format!("{user_name} rolled over \"{}\" to {}", updated.title, updated.billing_period),
-    ).await;
+        &format!(
+            "{user_name} rolled over \"{}\" to {}",
+            updated.title, updated.billing_period
+        ),
+    )
+    .await;
 
     s.broadcast(crate::models::HomeEvent {
         home_id,
@@ -422,10 +442,11 @@ async fn delete_bill(
 ) -> AppResult<Json<serde_json::Value>> {
     let home_id = bill_home(&s.pool, uid, bill_id).await?;
 
-    let existing: Option<(String,)> = sqlx::query_as("select title from household_bills where id = $1")
-        .bind(bill_id)
-        .fetch_optional(&s.pool)
-        .await?;
+    let existing: Option<(String,)> =
+        sqlx::query_as("select title from household_bills where id = $1")
+            .bind(bill_id)
+            .fetch_optional(&s.pool)
+            .await?;
 
     sqlx::query("delete from household_bills where id = $1")
         .bind(bill_id)
@@ -442,14 +463,7 @@ async fn delete_bill(
         Some((t,)) => format!("Deleted bill \"{}\"", t),
         None => "Deleted bill".to_string(),
     };
-    log_activity(
-        &s,
-        home_id,
-        uid,
-        "deleted",
-        "bill",
-        &desc,
-    ).await;
+    log_activity(&s, home_id, uid, "deleted", "bill", &desc).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }

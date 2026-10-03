@@ -1,0 +1,131 @@
+name: api
+
+# Tests every backend change. On main it also builds the arm64 image, pushes it to GHCR and deploys it.
+# Host details live only in the deploy secrets, never in this file.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/api.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/api.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: api-${{ github.ref }}
+  # Superseded PR runs can go; never cancel a main run mid-deploy.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: homesy
+          POSTGRES_PASSWORD: homesy
+          POSTGRES_DB: homesy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+        env:
+          DATABASE_URL: postgres://homesy:homesy@localhost:5432/homesy
+
+  build-push:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm # native arm64, matching the host
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/rohithgilla12/homesy-api
+          tags: |
+            type=sha,format=short,prefix=
+            type=raw,value=latest
+      - uses: docker/build-push-action@v7
+        with:
+          context: backend
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=homesy-api
+          cache-to: type=gha,scope=homesy-api,mode=max
+          provenance: false
+
+  deploy:
+    needs: build-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.homesy.gilla.fun
+    steps:
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          HOST_KEY: ${{ secrets.VPS_HOST_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Deploy
+        # The key's forced command on the host runs ~/homesy/deploy.sh, whatever is requested here.
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        # bash -eo pipefail, so an ssh failure is not masked by tee.
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/deploy -o BatchMode=yes -o IdentitiesOnly=yes "$VPS_USER@$VPS_HOST" 2>&1 | tee deploy.log
+          # A pinned HOMESY_IMAGE (left over from a rollback) means this run shipped nothing: fail loudly.
+          if grep -q '^WARNING: .env pins HOMESY_IMAGE' deploy.log; then
+            echo "::error::HOMESY_IMAGE is pinned on the host, so ${GITHUB_SHA:0:7} was not deployed. Reset it to :latest (see DEPLOY.md)."
+            exit 1
+          fi
+      - name: Smoke test
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if curl --max-time 8 -fsS https://api.homesy.gilla.fun/health; then echo; exit 0; fi
+            echo "attempt $attempt failed; retrying in 5s"
+            sleep 5
+          done
+          echo "::error::/health did not return 200 after 5 attempts"
+          exit 1

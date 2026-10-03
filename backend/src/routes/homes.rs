@@ -24,7 +24,6 @@ pub fn router() -> Router<AppState> {
         .route("/homes/{id}/events", get(home_events))
 }
 
-
 #[derive(Deserialize)]
 struct CreateHome {
     name: String,
@@ -49,11 +48,15 @@ const HOME_COLS: &str = "id, name, emoji, invite_code, created_by, created_at";
 pub(crate) fn gen_invite_code() -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     let mut rng = rand::thread_rng();
-    (0..6).map(|_| ALPHABET[rng.gen_range(0..ALPHABET.len())] as char).collect()
+    (0..6)
+        .map(|_| ALPHABET[rng.gen_range(0..ALPHABET.len())] as char)
+        .collect()
 }
 
-
-async fn list_homes(State(s): State<AppState>, AuthUser(uid): AuthUser) -> AppResult<Json<Vec<Home>>> {
+async fn list_homes(
+    State(s): State<AppState>,
+    AuthUser(uid): AuthUser,
+) -> AppResult<Json<Vec<Home>>> {
     let homes: Vec<Home> = sqlx::query_as(
         "select h.id, h.name, h.emoji, h.invite_code, h.created_by, h.created_at
            from homes h
@@ -109,7 +112,11 @@ async fn create_home(
         .await?;
 
     // Every home starts with the three canonical lists.
-    for (kind, name) in [("grocery", "Groceries"), ("laundry", "Laundry"), ("todo", "To-do")] {
+    for (kind, name) in [
+        ("grocery", "Groceries"),
+        ("laundry", "Laundry"),
+        ("todo", "To-do"),
+    ] {
         sqlx::query("insert into lists (id, home_id, kind, name) values ($1, $2, $3, $4)")
             .bind(Uuid::now_v7())
             .bind(home_id)
@@ -129,11 +136,13 @@ async fn join_home(
     Json(b): Json<JoinHome>,
 ) -> AppResult<Json<Home>> {
     let code = b.code.trim().to_uppercase();
-    let home: Home = sqlx::query_as(&format!("select {HOME_COLS} from homes where invite_code = $1"))
-        .bind(&code)
-        .fetch_optional(&s.pool)
-        .await?
-        .ok_or(AppError::NotFound)?;
+    let home: Home = sqlx::query_as(&format!(
+        "select {HOME_COLS} from homes where invite_code = $1"
+    ))
+    .bind(&code)
+    .fetch_optional(&s.pool)
+    .await?
+    .ok_or(AppError::NotFound)?;
 
     let home_id = home.id;
     sqlx::query(
@@ -151,14 +160,7 @@ async fn join_home(
         payload: serde_json::json!({ "user_id": uid }),
     });
 
-    log_activity(
-        &s,
-        home_id,
-        uid,
-        "joined",
-        "member",
-        "Joined the home",
-    ).await;
+    log_activity(&s, home_id, uid, "joined", "member", "Joined the home").await;
 
     Ok(Json(home))
 }
@@ -195,14 +197,17 @@ async fn leave_home(
             .bind(home_id)
             .fetch_one(&s.pool)
             .await?;
-    let me_owner: Option<(i32,)> =
-        sqlx::query_as("select 1 from home_members where home_id = $1 and user_id = $2 and role = 'owner'")
-            .bind(home_id)
-            .bind(uid)
-            .fetch_optional(&s.pool)
-            .await?;
+    let me_owner: Option<(i32,)> = sqlx::query_as(
+        "select 1 from home_members where home_id = $1 and user_id = $2 and role = 'owner'",
+    )
+    .bind(home_id)
+    .bind(uid)
+    .fetch_optional(&s.pool)
+    .await?;
     if me_owner.is_some() && owners.0 <= 1 {
-        return Err(AppError::BadRequest("transfer ownership before leaving".into()));
+        return Err(AppError::BadRequest(
+            "transfer ownership before leaving".into(),
+        ));
     }
     sqlx::query("delete from home_members where home_id = $1 and user_id = $2")
         .bind(home_id)
@@ -216,14 +221,7 @@ async fn leave_home(
         payload: serde_json::json!({ "user_id": uid }),
     });
 
-    log_activity(
-        &s,
-        home_id,
-        uid,
-        "left",
-        "member",
-        "Left the home",
-    ).await;
+    log_activity(&s, home_id, uid, "left", "member", "Left the home").await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -260,7 +258,11 @@ async fn home_events(
     State(s): State<AppState>,
     AuthUser(uid): AuthUser,
     Path(home_id): Path<Uuid>,
-) -> AppResult<axum::response::Sse<impl futures::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>>> {
+) -> AppResult<
+    axum::response::Sse<
+        impl futures::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+    >,
+> {
     ensure_member(&s.pool, uid, home_id).await?;
 
     let rx = s.events_tx.subscribe();
@@ -282,19 +284,25 @@ async fn home_events(
                         m
                     }
                 };
-                data_obj.insert("resource".to_string(), serde_json::Value::String(e.event_type.clone()));
-                data_obj.insert("type".to_string(), serde_json::Value::String(e.event_type.clone()));
+                data_obj.insert(
+                    "resource".to_string(),
+                    serde_json::Value::String(e.event_type.clone()),
+                );
+                data_obj.insert(
+                    "type".to_string(),
+                    serde_json::Value::String(e.event_type.clone()),
+                );
                 let data = serde_json::to_string(&data_obj).ok()?;
                 Some(Ok(axum::response::sse::Event::default()
                     .event(e.event_type)
                     .data(data)))
             })
         }
-
     });
 
-    Ok(axum::response::Sse::new(filtered_stream)
-        .keep_alive(axum::response::sse::KeepAlive::new().interval(std::time::Duration::from_secs(15))))
+    Ok(axum::response::Sse::new(filtered_stream).keep_alive(
+        axum::response::sse::KeepAlive::new().interval(std::time::Duration::from_secs(15)),
+    ))
 }
 
 #[cfg(test)]
@@ -320,5 +328,3 @@ mod tests {
         }
     }
 }
-
-

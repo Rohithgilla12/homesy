@@ -27,7 +27,7 @@ Changes to `deploy/compose.prod.yml`, `deploy/cloudflared.yml`, or `deploy/deplo
 
 1. In `~/homesy/.env`, set `HOMESY_IMAGE=ghcr.io/rohithgilla12/homesy-api:<good-sha>`.
 2. Run `~/homesy/deploy.sh` and check `curl -fsS https://api.homesy.gilla.fun/health`.
-3. Once a fix ships, set `HOMESY_IMAGE` back to `:latest`. While it is pinned, every CI deploy pulls the pinned tag and changes nothing. `deploy.sh` warns about this.
+3. Once a fix ships, set `HOMESY_IMAGE` back to `:latest`. While it is pinned, `deploy.sh` warns, and CI deploys fail with an error instead of reporting a deploy that shipped nothing.
 
 ## Migrations
 

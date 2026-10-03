@@ -111,7 +111,15 @@ jobs:
         env:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
-        run: ssh -i ~/.ssh/deploy -o BatchMode=yes -o IdentitiesOnly=yes "$VPS_USER@$VPS_HOST"
+        # bash -eo pipefail, so an ssh failure is not masked by tee.
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/deploy -o BatchMode=yes -o IdentitiesOnly=yes "$VPS_USER@$VPS_HOST" 2>&1 | tee deploy.log
+          # A pinned HOMESY_IMAGE (left over from a rollback) means this run shipped nothing: fail loudly.
+          if grep -q '^WARNING: .env pins HOMESY_IMAGE' deploy.log; then
+            echo "::error::HOMESY_IMAGE is pinned on the host, so ${GITHUB_SHA:0:7} was not deployed. Reset it to :latest (see DEPLOY.md)."
+            exit 1
+          fi
       - name: Smoke test
         run: |
           for attempt in 1 2 3 4 5; do

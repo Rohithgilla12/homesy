@@ -1181,3 +1181,27 @@ async fn test_cors_rejects_unlisted_origin() {
         .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
         .is_none());
 }
+
+#[tokio::test]
+async fn test_health_reports_unreachable_database_promptly() {
+    let app = create_app(unconnected_state(), None);
+    let started = std::time::Instant::now();
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "health must not wait for the pool timeout"
+    );
+    let body = parse_json_response(res.into_body()).await;
+    assert_eq!(body["error"], "database unavailable");
+}

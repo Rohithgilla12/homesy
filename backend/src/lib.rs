@@ -7,10 +7,13 @@ pub mod routes;
 pub mod state;
 
 use axum::{
+    extract::State,
     http::{header, HeaderValue, Method},
     routing::get,
     Router,
 };
+use error::{AppError, AppResult};
+use std::time::Duration;
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
     trace::TraceLayer,
@@ -19,7 +22,7 @@ use tower_http::{
 /// Builds the router. `cors_origins` comes from `CORS_ORIGINS`; `None` allows any origin (local development).
 pub fn create_app(state: state::AppState, cors_origins: Option<&[String]>) -> Router {
     Router::new()
-        .route("/health", get(|| async { "ok" }))
+        .route("/health", get(health))
         .merge(routes::auth::router())
         .merge(routes::homes::router())
         .merge(routes::lists::router())
@@ -29,6 +32,26 @@ pub fn create_app(state: state::AppState, cors_origins: Option<&[String]>) -> Ro
         .layer(cors_layer(cors_origins))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+/// Liveness plus a DB ping, bounded so a hung database fails fast instead of waiting out the pool timeout.
+async fn health(State(s): State<state::AppState>) -> AppResult<&'static str> {
+    match tokio::time::timeout(
+        Duration::from_secs(2),
+        sqlx::query("select 1").execute(&s.pool),
+    )
+    .await
+    {
+        Ok(Ok(_)) => Ok("ok"),
+        Ok(Err(e)) => {
+            tracing::warn!(error = %e, "health check: database unavailable");
+            Err(AppError::Unavailable)
+        }
+        Err(_) => {
+            tracing::warn!("health check: database ping timed out");
+            Err(AppError::Unavailable)
+        }
+    }
 }
 
 fn cors_layer(origins: Option<&[String]>) -> CorsLayer {

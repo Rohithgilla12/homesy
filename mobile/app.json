@@ -9,7 +9,10 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "app.homesy.mobile"
+      "bundleIdentifier": "app.homesy.mobile",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "app.homesy.mobile"
@@ -21,6 +24,15 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "25bd70bf-aa77-46f6-acca-530f8c2b69ac"
+      }
+    },
+    "owner": "gilladude"
   }
 }

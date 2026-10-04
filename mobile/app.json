@@ -20,7 +20,15 @@
       "expo-router",
       "expo-secure-store",
       "expo-asset",
-      "expo-status-bar"
+      "expo-status-bar",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 120,
+          "backgroundColor": "#F6F5F1"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
@@ -33,6 +41,7 @@
         "projectId": "25bd70bf-aa77-46f6-acca-530f8c2b69ac"
       }
     },
-    "owner": "gilladude"
+    "owner": "gilladude",
+    "icon": "./assets/icon.png"
   }
 }

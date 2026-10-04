@@ -1,0 +1,41 @@
+name: mobile
+
+# Gates every mobile change without a simulator: dependency health, types, and full iOS + web JS bundles.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mobile/**"
+      - ".github/workflows/mobile.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "mobile/**"
+      - ".github/workflows/mobile.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - run: npx --yes expo-doctor@latest
+      # expo-env.d.ts is generated and gitignored; recreate the one line it holds so tsc sees Expo's types.
+      - run: test -f expo-env.d.ts || printf '/// <reference types="expo/types" />\n' > expo-env.d.ts
+      - run: npx tsc --noEmit
+      - run: npx expo export --platform ios --output-dir dist/ios
+      - run: npx expo export --platform web --output-dir dist/web

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '@/api/client';
 import { useHomeEvents } from '@/api/events';
 import { useActiveHome } from '@/store/home';
@@ -15,8 +16,15 @@ export default function AppLayout() {
   useHomeEvents(activeHomeId);
 
   if (isLoading) return <View style={{ flex: 1, justifyContent: 'center' }}><ActivityIndicator /></View>;
-  // No homes yet → the Home screen doubles as onboarding (create or join).
-  if (homes && homes.length === 0) return <Onboarding />;
+  // No homes yet → the Home screen doubles as onboarding (create or join). It renders without a
+  // header or tab bar, so it needs its own safe-area padding.
+  if (homes && homes.length === 0) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top', 'bottom']}>
+        <Onboarding />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <Stack screenOptions={{ headerStyle: { backgroundColor: colors.bg }, headerShadowVisible: false, headerTintColor: colors.accent }}>

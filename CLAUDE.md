@@ -9,7 +9,7 @@ Homesy is a shared-household app where the **home is the unit, not the user**. A
 Two independent projects, no shared tooling or workspace at the root:
 
 - `backend/`: Rust (edition 2021, MSRV 1.80), Axum 0.8, SQLx 0.8 (Postgres), JWT + Argon2. Crate name `homesy_api`.
-- `mobile/`: Expo SDK 52, Expo Router 4 (typed routes), TanStack Query 5, Zustand 5, React Native 0.76 (new architecture).
+- `mobile/`: Expo SDK 57, Expo Router 57 (typed routes), TanStack Query 5, Zustand 5, React Native 0.86, Reanimated 4.
 
 ## Commands
 
@@ -29,7 +29,9 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings   # what CI enfor
 # Mobile (from mobile/)
 npm install
 npx expo start             # set EXPO_PUBLIC_API_URL to the machine's LAN IP for a physical device
-npm run typecheck          # tsc --noEmit; there is no lint or test setup on the mobile side
+npm run typecheck          # tsc --noEmit
+npm test                   # jest-expo unit tests for src/lib; `npm test -- --ci` is what CI runs
+npx expo start --clear     # needed whenever an EXPO_PUBLIC_* value changes: Metro inlines them at bundle time
 ```
 
 Integration tests (`backend/tests/api_integration_test.rs`) connect to `DATABASE_URL` or fall back to the local docker DB, run migrations, and drive the router in-process via `tower::ServiceExt::oneshot`. They write to that real database using unique emails and do not clean up, so do not point them at anything shared.
@@ -54,6 +56,16 @@ Integration tests (`backend/tests/api_integration_test.rs`) connect to `DATABASE
 - **API:** `src/api/client.ts` is the single typed `api` object. It reads the token from the Zustand session store, any 401 triggers `signOut()`, and plain-text error bodies (Axum rejections) are surfaced as the error message. Response types live in `src/api/types.ts`, mirrored by hand from `backend/src/models.rs` (see below). The import alias is `@/*` → `src/*`.
 - **State:** server state lives in TanStack Query, persisted to AsyncStorage (`HOMESY_QUERY_CACHE`, 24h). Query keys are scoped by home: `['lists', homeId]`, `['items', listId]`, `['vault', homeId]`, `['bills', homeId]`, `['bulletin', homeId]`, `['activity', homeId]`, `['home', homeId]`, `['homes']`. Client state is in Zustand: `store/session.ts` holds the token and user, `store/home.ts` holds the active home id, and both are persisted in SecureStore.
 - **Realtime sync (`src/api/events.ts`):** React Native has no `EventSource`, so SSE is read through `XMLHttpRequest` progress events with manual line parsing and exponential-backoff reconnects. Events are never applied to the cache directly. The hook only invalidates query keys by substring-matching the event name (`bill`, `vault`, `item`, …). A new backend event type needs a matching name or a branch here, or screens will not refresh.
+
+## Design system (mobile)
+
+- **Import from `@/ui` only.** Screens never import `Text`, `Pressable` or `Modal` from `react-native`, never write a hex literal, and never set `fontFamily` (the one exception is a navigation `headerTitleStyle`, which takes `font.<token>`). The composer `TextInput` in `app/(app)/lists/[id].tsx` is the one raw text input. `grep -rnE "#[0-9A-Fa-f]{6}|fontFamily|from 'react-native'.*\b(Text|Pressable|Modal)\b" app` should stay clean apart from those.
+- **Tokens** live in `src/ui/tokens.ts`: `color` (bg, surface, surfaceSunk, ink, ink2, muted, line, lineStrong, accent, accentSoft, accentInk, onAccent), `status` (warn/ok/danger with Soft and Ink variants), `category` tints for list, bill and vault tiles, `font` (Bricolage Grotesque for display, Geist for UI, Geist Mono), `type` variants, `space(n) = n * 4`, `radius`, and `motion` (press 160 ms, sheet 320 in / 200 out, spring damping 14 stiffness 220). The app is light-mode only.
+- **Primitives**: `Text` (variant + tone; `color` only takes a token), `Button`, `IconButton` (always pass `label`), `Card`, `Pill`, `Chip`, `Avatar`, `Input`, `DateField`, `Sheet`, `Screen`, `EmptyState`, `TabBar`, `AppHeader`. `Sheet` stays mounted until its exit animation finishes and dismisses by pan.
+- **Motion** lives in `src/ui/motion/`. Every moment checks `useReducedMotion()` and degrades to a fade or a snap; confetti does not render at all. List rows attach no Reanimated layout/entering/exiting props under Reduce Motion, because Reanimated parks a late-mounted row at its entering state otherwise. `LiveRow` highlights only rows from other members (`isFreshFromOthers` in `src/lib/activity.ts`); ids present on first load or created by the current user never flash.
+- **Refresh**: pull-to-refresh uses `useManualRefresh(refetch)` so the spinner reflects a pull only, not the background refetches that SSE invalidations trigger.
+- **Helpers** in `src/lib/` are pure and unit-tested (`format.ts` for rupees and relative dates, `activity.ts`, `errors.ts`, `color.ts`). `npm test` runs them with jest-expo; CI runs `npm test -- --ci` on every mobile PR.
+- When `EXPO_PUBLIC_*` values change, start the dev server with `--clear`: Metro inlines them at bundle time and a warm cache keeps the old value.
 
 ## Conventions and gotchas
 

@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '@/api/client';
 import { useHomeEvents } from '@/api/events';
 import { useActiveHome } from '@/store/home';
-import { colors } from '@/ui/theme';
+import { color, font } from '@/ui/tokens';
 import Onboarding from './(tabs)/home';
 
 export default function AppLayout() {
@@ -15,19 +15,19 @@ export default function AppLayout() {
   // Realtime SSE sync: invalidates caches on changes while viewing active home
   useHomeEvents(activeHomeId);
 
-  if (isLoading) return <View style={{ flex: 1, justifyContent: 'center' }}><ActivityIndicator /></View>;
+  if (isLoading) return <View style={{ flex: 1, justifyContent: 'center', backgroundColor: color.bg }}><ActivityIndicator color={color.accent} /></View>;
   // No homes yet → the Home screen doubles as onboarding (create or join). It renders without a
   // header or tab bar, so it needs its own safe-area padding.
   if (homes && homes.length === 0) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top', 'bottom']}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: color.bg }} edges={['top', 'bottom']}>
         <Onboarding />
       </SafeAreaView>
     );
   }
 
   return (
-    <Stack screenOptions={{ headerStyle: { backgroundColor: colors.bg }, headerShadowVisible: false, headerTintColor: colors.accent }}>
+    <Stack screenOptions={{ headerStyle: { backgroundColor: color.bg }, headerShadowVisible: false, headerTintColor: color.accentInk, headerTitleStyle: { fontFamily: font.semibold, color: color.ink } }}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="lists/[id]" options={{ headerBackTitle: 'Lists' }} />
     </Stack>

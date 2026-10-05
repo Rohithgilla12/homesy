@@ -1,451 +1,269 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
-import {
-  Alert,
-  FlatList,
-  Modal,
-  Pressable,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, RefreshControl, StyleSheet, Switch, TextInput, View, useWindowDimensions } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  FadeIn, FadeOut, LinearTransition, useAnimatedReaction, useAnimatedStyle, useSharedValue, withSpring,
+} from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { api } from '@/api/client';
 import type { ListItem } from '@/api/types';
+import { isFreshFromOthers } from '@/lib/activity';
+import { friendlyError } from '@/lib/errors';
 import { useActiveHome } from '@/store/home';
-import { Button, Card, Input, Muted, Row, Screen } from '@/ui/primitives';
-import { colors, radius, space } from '@/ui/theme';
+import { useSession } from '@/store/session';
+import {
+  AnimatedCheck, Button, Card, Chip, EmptyState, Icon, IconButton, Input, LiveRow, Pill, Screen, Sheet, StrikeText, Text,
+  color, font, haptic, motion, radius, space, status, type as typo,
+} from '@/ui';
+
+const TICK_MS = 340; // let the check draw and the strike sweep before the row moves to Done
+const SWIPE_COMMIT = 0.35;
 
 export default function ListDetailScreen() {
   const { id, name } = useLocalSearchParams<{ id: string; name?: string }>();
   const homeId = useActiveHome((s) => s.activeHomeId);
+  const me = useSession((s) => s.user);
   const qc = useQueryClient();
 
-  // Add Item form state
   const [title, setTitle] = useState('');
   const [qty, setQty] = useState('');
   const [note, setNote] = useState('');
-  const [showExtra, setShowExtra] = useState(false);
+  const [showQty, setShowQty] = useState(false);
+  const [showNote, setShowNote] = useState(false);
+  const [ticking, setTicking] = useState<Set<string>>(new Set());
 
-  // Edit Item modal state
-  const [editingItem, setEditingItem] = useState<ListItem | null>(null);
+  const [editing, setEditing] = useState<ListItem | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editQty, setEditQty] = useState('');
   const [editNote, setEditNote] = useState('');
   const [editDone, setEditDone] = useState(false);
 
   const key = ['items', id];
-  const { data: items = [], refetch, isRefetching } = useQuery({
-    queryKey: key,
-    queryFn: () => api.items(id),
-  });
-
+  const { data: items = [], refetch, isRefetching, isSuccess } = useQuery({ queryKey: key, queryFn: () => api.items(id) });
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: key });
     qc.invalidateQueries({ queryKey: ['lists', homeId] });
   };
 
-  const addMutation = useMutation({
-    mutationFn: () =>
-      api.createItem(id, {
-        title: title.trim(),
-        qty: qty.trim() || undefined,
-        note: note.trim() || undefined,
-      }),
-    onSuccess: () => {
-      setTitle('');
-      setQty('');
-      setNote('');
-      setShowExtra(false);
+  // Ids present on first load or added by me never get the live highlight; only later arrivals from others do.
+  const seen = useRef<Set<string> | null>(null);
+  const fresh = new Set<string>();
+  if (isSuccess) {
+    if (!seen.current) seen.current = new Set(items.map((i) => i.id));
+    for (const it of items) if (!seen.current.has(it.id) && isFreshFromOthers(it.created_by, me?.id)) fresh.add(it.id);
+  }
+  useEffect(() => { if (seen.current) items.forEach((i) => seen.current!.add(i.id)); }, [items]);
+
+  const add = useMutation({
+    mutationFn: () => api.createItem(id, { title: title.trim(), qty: qty.trim() || undefined, note: note.trim() || undefined }),
+    onSuccess: (created) => {
+      seen.current?.add(created.id);
+      setTitle(''); setQty(''); setNote(''); setShowQty(false); setShowNote(false);
       invalidate();
     },
-    onError: (e: Error) => Alert.alert('Could not add item', e.message),
+    onError: (e) => Alert.alert('Could not add item', friendlyError(e, 'generic')),
   });
-
-  // Optimistic toggle: flip locally, reconcile on settle
-  const toggleMutation = useMutation({
+  const toggle = useMutation({
     mutationFn: (it: ListItem) => api.updateItem(it.id, { done: !it.done }),
     onMutate: async (it) => {
       await qc.cancelQueries({ queryKey: key });
       const prev = qc.getQueryData<ListItem[]>(key);
-      qc.setQueryData<ListItem[]>(key, (old = []) =>
-        old.map((x) => (x.id === it.id ? { ...x, done: !x.done } : x))
-      );
+      qc.setQueryData<ListItem[]>(key, (old = []) => old.map((x) => (x.id === it.id ? { ...x, done: !x.done } : x)));
       return { prev };
     },
     onError: (_e, _v, ctx) => ctx?.prev && qc.setQueryData(key, ctx.prev),
     onSettled: invalidate,
   });
-
-  const editMutation = useMutation({
-    mutationFn: () =>
-      api.updateItem(editingItem!.id, {
-        title: editTitle.trim(),
-        qty: editQty.trim(),
-        note: editNote.trim(),
-        done: editDone,
-      }),
-    onSuccess: () => {
-      setEditingItem(null);
-      invalidate();
-    },
-    onError: (e: Error) => Alert.alert('Could not update item', e.message),
+  const edit = useMutation({
+    mutationFn: () => api.updateItem(editing!.id, { title: editTitle.trim(), qty: editQty.trim(), note: editNote.trim(), done: editDone }),
+    onSuccess: () => { setEditing(null); invalidate(); },
+    onError: (e) => Alert.alert('Could not update item', friendlyError(e, 'generic')),
   });
-
-  const removeMutation = useMutation({
+  const remove = useMutation({
     mutationFn: (itemId: string) => api.deleteItem(itemId),
-    onSuccess: () => {
-      setEditingItem(null);
-      invalidate();
-    },
-    onError: (e: Error) => Alert.alert('Could not delete item', e.message),
+    onSuccess: () => { setEditing(null); invalidate(); },
+    onError: (e) => Alert.alert('Could not delete item', friendlyError(e, 'generic')),
   });
-
-  const clearCompletedMutation = useMutation({
+  const clearDone = useMutation({
     mutationFn: () => api.clearCompleted(id),
-    onSuccess: (data) => {
-      invalidate();
-      Alert.alert('Cleared', `Removed ${data.deleted} completed item(s).`);
-    },
-    onError: (e: Error) => Alert.alert('Could not clear completed', e.message),
+    onSuccess: invalidate,
+    onError: (e) => Alert.alert('Could not clear completed', friendlyError(e, 'generic')),
   });
 
-  const openEditModal = (item: ListItem) => {
-    setEditingItem(item);
-    setEditTitle(item.title);
-    setEditQty(item.qty ?? '');
-    setEditNote(item.note ?? '');
-    setEditDone(item.done);
+  const tick = (it: ListItem) => {
+    if (it.done) { toggle.mutate(it); return; }
+    setTicking((s) => new Set(s).add(it.id));
+    setTimeout(() => {
+      toggle.mutate(it);
+      setTicking((s) => { const n = new Set(s); n.delete(it.id); return n; });
+    }, TICK_MS);
+  };
+  const confirmDelete = (it: ListItem) => Alert.alert('Delete item?', `Delete "${it.title}"?`, [
+    { text: 'Cancel', style: 'cancel' },
+    { text: 'Delete', style: 'destructive', onPress: () => remove.mutate(it.id) },
+  ]);
+  const openEdit = (it: ListItem) => {
+    setEditing(it); setEditTitle(it.title); setEditQty(it.qty ?? ''); setEditNote(it.note ?? ''); setEditDone(it.done);
   };
 
-  const activeItems = items.filter((i) => !i.done);
-  const completedItems = items.filter((i) => i.done);
-
-  const confirmClearCompleted = () => {
-    if (completedItems.length === 0) return;
-    Alert.alert(
-      'Clear completed items?',
-      `Are you sure you want to remove all ${completedItems.length} completed item(s)?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear completed',
-          style: 'destructive',
-          onPress: () => clearCompletedMutation.mutate(),
-        },
-      ]
-    );
-  };
+  const open = items.filter((i) => !i.done);
+  const done = items.filter((i) => i.done);
+  const submitAdd = () => { if (title.trim()) add.mutate(); };
 
   return (
-    <Screen>
+    <>
       <Stack.Screen
         options={{
           title: name ?? 'List',
-          headerTitle: name ?? 'List',
-          headerRight: () =>
-            completedItems.length > 0 ? (
-              <Pressable
-                onPress={confirmClearCompleted}
-                style={{ paddingHorizontal: space(1), paddingVertical: space(0.5) }}
-              >
-                <Text style={{ color: colors.accent, fontWeight: '600', fontSize: 14 }}>
-                  Clear ({completedItems.length})
-                </Text>
-              </Pressable>
-            ) : null,
+          headerTitleStyle: { fontFamily: font.semibold, color: color.ink },
+          headerRight: () => (done.length > 0 ? (
+            <Button
+              title={`Clear done (${done.length})`}
+              variant="ghost"
+              size="sm"
+              onPress={() => Alert.alert('Clear completed items?', `Remove all ${done.length} completed item(s)?`, [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Clear completed', style: 'destructive', onPress: () => clearDone.mutate() },
+              ])}
+            />
+          ) : null),
         }}
       />
+      <Screen scroll refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={color.accent} />}>
+        <View>
+          <Text variant="display" style={{ fontSize: 30, lineHeight: 36 }}>{name ?? 'List'}</Text>
+          <Text tone="muted">{open.length} to get</Text>
+        </View>
 
-      {/* Add Item Box */}
-      <Card style={{ marginBottom: space(1.5) }}>
-        <Row style={{ gap: space(1) }}>
-          <Input
-            placeholder="Add an item..."
-            value={title}
-            onChangeText={setTitle}
-            style={{ flex: 1, marginBottom: 0 }}
-            onSubmitEditing={() => title.trim() && addMutation.mutate()}
-            returnKeyType="done"
-          />
-          <Pressable
-            onPress={() => setShowExtra(!showExtra)}
-            style={[s.extraToggle, showExtra && s.extraToggleActive]}
-          >
-            <Text style={[s.extraToggleText, showExtra && s.extraToggleTextActive]}>
-              {showExtra ? 'Less' : '+ Note/Qty'}
-            </Text>
-          </Pressable>
-        </Row>
-
-        {showExtra && (
-          <View style={{ marginTop: space(1), gap: space(0.75) }}>
-            <Row style={{ gap: space(1) }}>
-              <Input
-                placeholder="Qty / units (e.g. 2 pcs, 1 kg)"
-                value={qty}
-                onChangeText={setQty}
-                style={{ flex: 1, marginBottom: 0 }}
-              />
-            </Row>
-            <Input
-              placeholder="Note (e.g. brand, specific store, instructions)"
-              value={note}
-              onChangeText={setNote}
-              style={{ marginBottom: 0 }}
+        <Card padded={false} style={{ padding: space(2), gap: space(2) }}>
+          <View style={s.composer}>
+            {/* The one raw TextInput: an inline composer has no room for Input's visible label. */}
+            <TextInput
+              accessibilityLabel="Add an item"
+              placeholder="Add an item"
+              placeholderTextColor={color.muted}
+              value={title}
+              onChangeText={setTitle}
+              onSubmitEditing={submitAdd}
+              returnKeyType="done"
+              style={s.composerInput}
             />
+            <IconButton icon="add" label="Add item" variant="filled" onPress={submitAdd} />
           </View>
-        )}
+          <View style={{ flexDirection: 'row', gap: space(2), paddingHorizontal: space(2) }}>
+            <Chip label="+ Quantity" selected={showQty} onPress={() => setShowQty((v) => !v)} />
+            <Chip label="+ Note" selected={showNote} onPress={() => setShowNote((v) => !v)} />
+          </View>
+          {showQty ? <View style={{ paddingHorizontal: space(2) }}><Input label="Quantity" placeholder="e.g. 2 pcs, 1 kg" value={qty} onChangeText={setQty} /></View> : null}
+          {showNote ? <View style={{ paddingHorizontal: space(2), paddingBottom: space(2) }}><Input label="Note" placeholder="e.g. brand, specific store, instructions" value={note} onChangeText={setNote} /></View> : null}
+        </Card>
 
-        <Button
-          title="Add item"
-          onPress={() => title.trim() && addMutation.mutate()}
-          loading={addMutation.isPending}
-          style={{ marginTop: space(1) }}
-        />
-      </Card>
+        {items.length === 0 ? (
+          <EmptyState icon="list.grocery" title="No items in this list" body="Add your first item using the box above." />
+        ) : null}
 
-      {/* Items List */}
-      <FlatList
-        data={[...activeItems, ...completedItems]}
-        keyExtractor={(i) => i.id}
-        refreshing={isRefetching}
-        onRefresh={refetch}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ gap: space(1), paddingBottom: space(4) }}
-        ListEmptyComponent={
-          <Card style={{ alignItems: 'center', paddingVertical: space(3) }}>
-            <Text style={{ fontSize: 32, marginBottom: space(1) }}>🛒</Text>
-            <Text style={s.emptyTitle}>No items in this list</Text>
-            <Muted>Add your first item using the box above.</Muted>
+        {open.length > 0 ? (
+          <Card padded={false} style={{ overflow: 'hidden' }}>
+            {open.map((it, i) => (
+              <Animated.View key={it.id} layout={LinearTransition.duration(220).easing(motion.sheetIn.easing)} entering={FadeIn.duration(180)} exiting={FadeOut.duration(160)}>
+                <LiveRow fresh={fresh.has(it.id)}>
+                  <SwipeRow onComplete={() => tick(it)} onDelete={() => confirmDelete(it)} last={i === open.length - 1}>
+                    <AnimatedCheck checked={ticking.has(it.id)} onPress={() => tick(it)} label={`Tick off ${it.title}`} />
+                    <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space(1.5), flexWrap: 'wrap' }}>
+                        <StrikeText struck={ticking.has(it.id)}>{it.title}</StrikeText>
+                        {it.qty ? <Pill label={it.qty} tone="neutral" /> : null}
+                      </View>
+                      {it.note ? <Text variant="label" tone="muted">{it.note}</Text> : null}
+                    </View>
+                    <IconButton icon="edit" label={`Edit ${it.title}`} onPress={() => openEdit(it)} />
+                  </SwipeRow>
+                </LiveRow>
+              </Animated.View>
+            ))}
           </Card>
-        }
-        renderItem={({ item }) => (
-          <Pressable
-            onPress={() => toggleMutation.mutate(item)}
-            onLongPress={() =>
-              Alert.alert(item.title, 'What would you like to do?', [
-                { text: 'Edit', onPress: () => openEditModal(item) },
-                {
-                  text: 'Delete',
-                  style: 'destructive',
-                  onPress: () => removeMutation.mutate(item.id),
-                },
-                { text: 'Cancel', style: 'cancel' },
-              ])
-            }
-            style={[s.itemCard, item.done && s.itemDone]}
-          >
-            {/* Checkbox */}
-            <Pressable
-              onPress={(e) => {
-                e.stopPropagation();
-                toggleMutation.mutate(item);
-              }}
-              style={s.checkTouch}
-            >
-              <Text style={[s.check, item.done && s.checkDone]}>
-                {item.done ? '☑' : '☐'}
-              </Text>
-            </Pressable>
+        ) : null}
 
-            {/* Content */}
-            <View style={{ flex: 1 }}>
-              <Row style={{ flexWrap: 'wrap', gap: space(0.5) }}>
-                <Text style={[s.itemTitle, item.done && s.itemTitleDone]}>
-                  {item.title}
-                </Text>
-                {item.qty ? <Text style={s.qtyBadge}>{item.qty}</Text> : null}
-              </Row>
-              {item.note ? <Text style={s.itemNote}>{item.note}</Text> : null}
-            </View>
+        {done.length > 0 ? (
+          <>
+            <Text variant="caption" tone="muted" style={{ marginLeft: space(1) }}>Done · {done.length}</Text>
+            <Card padded={false} style={{ overflow: 'hidden', backgroundColor: color.surfaceSunk }}>
+              {done.map((it, i) => (
+                <Animated.View key={it.id} layout={LinearTransition.duration(220).easing(motion.sheetIn.easing)} entering={FadeIn.duration(180).delay(60)} exiting={FadeOut.duration(160)}>
+                  <View style={[s.row, i === done.length - 1 && s.rowLast]}>
+                    <AnimatedCheck checked onPress={() => tick(it)} label={`Bring back ${it.title}`} />
+                    <View style={{ flex: 1 }}><StrikeText struck variant="body">{it.title}</StrikeText></View>
+                    <IconButton icon="edit" label={`Edit ${it.title}`} onPress={() => openEdit(it)} />
+                  </View>
+                </Animated.View>
+              ))}
+            </Card>
+          </>
+        ) : null}
+      </Screen>
 
-            {/* Edit button */}
-            <Pressable
-              onPress={(e) => {
-                e.stopPropagation();
-                openEditModal(item);
-              }}
-              style={s.editAction}
-            >
-              <Text style={s.editActionText}>✎</Text>
-            </Pressable>
-          </Pressable>
-        )}
-      />
+      <Sheet visible={!!editing} onClose={() => setEditing(null)} title="Edit item">
+        <Input label="Title" value={editTitle} onChangeText={setEditTitle} />
+        <Input label="Quantity (optional)" placeholder="e.g. 2 cartons, 500g" value={editQty} onChangeText={setEditQty} />
+        <Input label="Note (optional)" placeholder="e.g. brand, store details" value={editNote} onChangeText={setEditNote} multiline />
+        <View style={s.switchRow}>
+          <Text variant="headline">Completed</Text>
+          <Switch value={editDone} onValueChange={setEditDone} trackColor={{ true: color.accent }} accessibilityLabel="Completed" />
+        </View>
+        <Button title="Save changes" fullWidth loading={edit.isPending} onPress={() => edit.mutate()} />
+        <Button title="Delete item" variant="danger" fullWidth onPress={() => editing && confirmDelete(editing)} />
+      </Sheet>
+    </>
+  );
+}
 
-      {/* Edit Item Modal */}
-      <Modal
-        visible={!!editingItem}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setEditingItem(null)}
-      >
-        <Pressable style={s.backdrop} onPress={() => setEditingItem(null)}>
-          <Pressable style={s.sheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={s.sheetTitle}>Edit Item</Text>
+/** Swipe right to complete, left to delete; a flick commits even if short, with a haptic tick at the threshold. */
+function SwipeRow({ children, onComplete, onDelete, last }: { children: React.ReactNode; onComplete: () => void; onDelete: () => void; last: boolean }) {
+  const { width } = useWindowDimensions();
+  const x = useSharedValue(0);
+  const limit = width * SWIPE_COMMIT;
 
-            <Muted>Title</Muted>
-            <Input
-              placeholder="Title"
-              value={editTitle}
-              onChangeText={setEditTitle}
-            />
+  useAnimatedReaction(() => Math.abs(x.value) >= limit, (past, was) => { if (past && !was) scheduleOnRN(haptic.selection); });
 
-            <Muted>Quantity (optional)</Muted>
-            <Input
-              placeholder="e.g. 2 cartons, 500g"
-              value={editQty}
-              onChangeText={setEditQty}
-            />
+  const pan = Gesture.Pan()
+    .activeOffsetX([-14, 14])
+    .failOffsetY([-10, 10])
+    .onUpdate((e) => {
+      const max = width * 0.6;
+      x.value = Math.abs(e.translationX) > max ? Math.sign(e.translationX) * (max + (Math.abs(e.translationX) - max) / 4) : e.translationX;
+    })
+    .onEnd((e) => {
+      if (x.value > limit || e.velocityX > 110 * 6) scheduleOnRN(onComplete);
+      else if (x.value < -limit || e.velocityX < -110 * 6) scheduleOnRN(onDelete);
+      x.value = withSpring(0, motion.spring);
+    });
 
-            <Muted>Note (optional)</Muted>
-            <Input
-              placeholder="e.g. brand, store details"
-              value={editNote}
-              onChangeText={setEditNote}
-              multiline
-            />
+  const front = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
+  const doneUnder = useAnimatedStyle(() => ({ opacity: x.value > 0 ? Math.min(1, x.value / limit) : 0 }));
+  const delUnder = useAnimatedStyle(() => ({ opacity: x.value < 0 ? Math.min(1, -x.value / limit) : 0 }));
 
-            <Row style={{ justifyContent: 'space-between', paddingVertical: space(0.5) }}>
-              <Muted>Completed</Muted>
-              <Switch
-                value={editDone}
-                onValueChange={setEditDone}
-                trackColor={{ true: colors.accent }}
-              />
-            </Row>
-
-            <Button
-              title="Save changes"
-              onPress={() => editTitle.trim() && editMutation.mutate()}
-              loading={editMutation.isPending}
-            />
-
-            <Button
-              title="Delete item"
-              variant="danger"
-              onPress={() =>
-                Alert.alert('Delete item?', `Delete "${editingItem?.title}"?`, [
-                  { text: 'Cancel', style: 'cancel' },
-                  {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: () => removeMutation.mutate(editingItem!.id),
-                  },
-                ])
-              }
-              loading={removeMutation.isPending}
-            />
-
-            <Button title="Cancel" variant="ghost" onPress={() => setEditingItem(null)} />
-          </Pressable>
-        </Pressable>
-      </Modal>
-    </Screen>
+  return (
+    <View>
+      <Animated.View style={[StyleSheet.absoluteFill, s.under, { backgroundColor: color.accent, justifyContent: 'flex-start' }, doneUnder]}>
+        <Icon name="check" tint={color.onAccent} /><Text variant="label" tone="onAccent">Done</Text>
+      </Animated.View>
+      <Animated.View style={[StyleSheet.absoluteFill, s.under, { backgroundColor: status.danger, justifyContent: 'flex-end' }, delUnder]}>
+        <Text variant="label" tone="onAccent">Delete</Text><Icon name="delete" tint={color.onAccent} />
+      </Animated.View>
+      <GestureDetector gesture={pan}>
+        <Animated.View style={[s.row, last && s.rowLast, { backgroundColor: color.surface }, front]}>{children}</Animated.View>
+      </GestureDetector>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
-  extraToggle: {
-    paddingHorizontal: space(1.25),
-    paddingVertical: space(1.5),
-    backgroundColor: colors.card,
-    borderRadius: radius,
-    borderWidth: 1,
-    borderColor: colors.line,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  extraToggleActive: {
-    backgroundColor: colors.accentSoft,
-    borderColor: colors.accent,
-  },
-  extraToggleText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.muted,
-  },
-  extraToggleTextActive: {
-    color: colors.accent,
-  },
-  itemCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space(1.25),
-    backgroundColor: colors.card,
-    padding: space(1.5),
-    borderRadius: radius,
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  itemDone: {
-    opacity: 0.6,
-    backgroundColor: '#F9F8F6',
-  },
-  checkTouch: {
-    padding: space(0.25),
-  },
-  check: {
-    fontSize: 22,
-    color: colors.muted,
-  },
-  checkDone: {
-    color: colors.accent,
-  },
-  itemTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.ink,
-  },
-  itemTitleDone: {
-    textDecorationLine: 'line-through',
-    color: colors.muted,
-  },
-  itemNote: {
-    fontSize: 13,
-    color: colors.muted,
-    marginTop: 2,
-  },
-  qtyBadge: {
-    backgroundColor: colors.accentSoft,
-    color: colors.accent,
-    fontSize: 12,
-    fontWeight: '700',
-    paddingHorizontal: space(0.75),
-    paddingVertical: space(0.25),
-    borderRadius: 999,
-  },
-  editAction: {
-    padding: space(1),
-  },
-  editActionText: {
-    fontSize: 18,
-    color: colors.muted,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.ink,
-    marginBottom: space(0.5),
-  },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: colors.bg,
-    padding: space(2.5),
-    borderTopLeftRadius: radius * 1.5,
-    borderTopRightRadius: radius * 1.5,
-    gap: space(1),
-  },
-  sheetTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.ink,
-    marginBottom: space(0.5),
-  },
+  composer: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
+  composerInput: { ...typo.body, fontSize: 16, color: color.ink, flex: 1, paddingHorizontal: space(2), paddingVertical: space(2) },
+  row: { flexDirection: 'row', alignItems: 'center', gap: space(3), paddingVertical: space(2), paddingLeft: space(4), paddingRight: space(1), borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: color.line },
+  rowLast: { borderBottomWidth: 0 },
+  under: { flexDirection: 'row', alignItems: 'center', gap: space(2), paddingHorizontal: space(5), borderRadius: radius.sm },
+  switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
 });

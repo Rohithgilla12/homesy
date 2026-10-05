@@ -1,269 +1,101 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'expo-router';
+import { router } from 'expo-router';
 import { useState } from 'react';
-import {
-  Alert,
-  FlatList,
-  Modal,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { api } from '@/api/client';
-import { LIST_KIND_ICON, type ListKind } from '@/api/types';
+import type { ListKind } from '@/api/types';
+import { friendlyError } from '@/lib/errors';
 import { useActiveHome } from '@/store/home';
-import { Button, Card, Input, Muted, Row, Screen, Title } from '@/ui/primitives';
-import { colors, radius, space } from '@/ui/theme';
+import {
+  Button, Card, Chip, EmptyState, Icon, Input, Pill, Screen, Sheet, Text, category, color, radius, space, useRoofRefresh,
+} from '@/ui';
 
-const LIST_KINDS: { kind: ListKind; label: string; icon: string }[] = [
-  { kind: 'grocery', label: 'Groceries', icon: '🛒' },
-  { kind: 'laundry', label: 'Laundry', icon: '🧺' },
-  { kind: 'todo', label: 'To-do', icon: '✅' },
-  { kind: 'custom', label: 'Custom', icon: '📝' },
+const KINDS: { kind: ListKind; label: string; caption: string; placeholder: string }[] = [
+  { kind: 'grocery', label: 'Groceries', caption: 'Grocery list', placeholder: 'e.g. Weekly Groceries' },
+  { kind: 'laundry', label: 'Laundry', caption: 'Laundry list', placeholder: 'e.g. Dry Cleaning' },
+  { kind: 'todo', label: 'To-do', caption: 'To-do list', placeholder: 'e.g. Weekend Chores' },
+  { kind: 'custom', label: 'Custom', caption: 'Custom list', placeholder: 'e.g. Diwali Shopping' },
 ];
+const kindInfo = (k: ListKind) => KINDS.find((x) => x.kind === k) ?? KINDS[3];
 
 export default function ListsScreen() {
   const homeId = useActiveHome((s) => s.activeHomeId);
   const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState<ListKind>('custom');
+  const [name, setName] = useState('');
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const [selectedKind, setSelectedKind] = useState<ListKind>('custom');
-  const [listName, setListName] = useState('');
-
-  const { data: lists = [], refetch, isRefetching } = useQuery({
-    queryKey: ['lists', homeId],
-    queryFn: () => api.lists(homeId!),
-    enabled: !!homeId,
-  });
+  const { data: lists = [], refetch, isRefetching } = useQuery({ queryKey: ['lists', homeId], queryFn: () => api.lists(homeId!), enabled: !!homeId });
+  const { onScroll, refreshControl, indicator } = useRoofRefresh({ refreshing: isRefetching, onRefresh: refetch });
 
   const create = useMutation({
-    mutationFn: () =>
-      api.createList(homeId!, {
-        kind: selectedKind,
-        name: listName.trim(),
-      }),
+    mutationFn: () => api.createList(homeId!, { kind, name: name.trim() }),
     onSuccess: () => {
-      setListName('');
-      setSelectedKind('custom');
-      setModalOpen(false);
+      setName(''); setKind('custom'); setOpen(false);
       qc.invalidateQueries({ queryKey: ['lists', homeId] });
     },
-    onError: (e: Error) => Alert.alert('Could not create list', e.message),
+    onError: (e) => Alert.alert('Could not create list', friendlyError(e, 'generic')),
   });
 
-  const handleOpenCreateModal = (kind: ListKind = 'custom') => {
-    setSelectedKind(kind);
-    setListName('');
-    setModalOpen(true);
-  };
+  const totalOpen = lists.reduce((n, l) => n + l.open_count, 0);
+  const openSheet = (k: ListKind = 'custom') => { setKind(k); setName(''); setOpen(true); };
 
   return (
     <Screen>
-      <FlatList
+      {indicator}
+      <Animated.FlatList
         data={lists}
         keyExtractor={(l) => l.id}
-        refreshing={isRefetching}
-        onRefresh={refetch}
-        contentContainerStyle={{ gap: space(1.25), paddingBottom: space(4) }}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        refreshControl={refreshControl}
+        contentContainerStyle={{ gap: space(2.5), paddingTop: space(2), paddingBottom: space(8) }}
         ListHeaderComponent={
-          <Row style={{ justifyContent: 'space-between', marginBottom: space(1) }}>
-            <View>
-              <Title>Lists</Title>
-              <Muted>Shared household checklists and tasks</Muted>
+          <View style={s.header}>
+            <View style={{ flex: 1 }}>
+              <Text variant="display">Lists</Text>
+              <Text tone="muted">{lists.length} {lists.length === 1 ? 'list' : 'lists'} · {totalOpen} open {totalOpen === 1 ? 'item' : 'items'}</Text>
             </View>
-            <Pressable
-              onPress={() => handleOpenCreateModal('custom')}
-              style={s.addBtn}
-            >
-              <Text style={s.addBtnText}>+ New list</Text>
-            </Pressable>
-          </Row>
+            <Button title="New list" icon="add" size="sm" variant="secondary" onPress={() => openSheet()} />
+          </View>
         }
-        renderItem={({ item }) => (
-          <Link
-            href={{ pathname: '/lists/[id]', params: { id: item.id, name: item.name } }}
-            asChild
-          >
-            <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
-              <Card style={s.listCard}>
-                <Row style={{ justifyContent: 'space-between' }}>
-                  <Row style={{ gap: space(1.5), flex: 1 }}>
-                    <Text style={s.icon}>{LIST_KIND_ICON[item.kind] ?? '📝'}</Text>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.name} numberOfLines={1}>
-                        {item.name}
-                      </Text>
-                      <Muted style={s.kindLabel}>
-                        {item.kind.toUpperCase()}
-                      </Muted>
-                    </View>
-                  </Row>
-                  <View style={[s.badge, item.open_count > 0 && s.badgeActive]}>
-                    <Text style={[s.count, item.open_count > 0 && s.countActive]}>
-                      {item.open_count} open
-                    </Text>
-                  </View>
-                </Row>
-              </Card>
-            </Pressable>
-          </Link>
-        )}
         ListEmptyComponent={
-          <Card style={{ alignItems: 'center', paddingVertical: space(3) }}>
-            <Text style={{ fontSize: 32, marginBottom: space(1) }}>📋</Text>
-            <Text style={s.emptyTitle}>No lists in this home yet</Text>
-            <Muted>Create a grocery, laundry, or to-do list to get started.</Muted>
-            <Button
-              title="Create a list"
-              onPress={() => handleOpenCreateModal('custom')}
-              style={{ marginTop: space(2) }}
-            />
-          </Card>
+          <EmptyState icon="list.custom" title="No lists in this home yet" body="Create a grocery, laundry, or to-do list to get started." actionLabel="Create a list" onAction={() => openSheet()} />
         }
+        renderItem={({ item }) => {
+          const tint = category.list[item.kind] ?? category.list.custom;
+          return (
+            <Card
+              onPress={() => router.push({ pathname: '/lists/[id]', params: { id: item.id, name: item.name } })}
+              accessibilityLabel={`${item.name}, ${item.open_count} open`}
+              style={s.row}
+            >
+              <View style={[s.tile, { backgroundColor: tint.bg }]}><Icon name={`list.${item.kind}`} tint={tint.fg} /></View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text variant="headline" numberOfLines={1}>{item.name}</Text>
+                <Text variant="label" tone="muted">{kindInfo(item.kind).caption}</Text>
+              </View>
+              <Pill label={item.open_count > 0 ? `${item.open_count} open` : 'All done'} tone={item.open_count > 0 ? 'accent' : 'neutral'} />
+              <Icon name="chevronRight" size={18} tint={color.muted} />
+            </Card>
+          );
+        }}
       />
 
-      {/* Create List Modal */}
-      <Modal
-        visible={modalOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setModalOpen(false)}
-      >
-        <Pressable style={s.backdrop} onPress={() => setModalOpen(false)}>
-          <Pressable style={s.sheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={s.sheetTitle}>Create new list</Text>
-            <Muted>Select list category and give it a title.</Muted>
-
-            <View style={{ marginVertical: space(1) }}>
-              <Muted>Type</Muted>
-              <Row style={{ flexWrap: 'wrap', gap: space(1), marginTop: space(0.5) }}>
-                {LIST_KINDS.map((k) => (
-                  <Pressable
-                    key={k.kind}
-                    onPress={() => setSelectedKind(k.kind)}
-                    style={[s.kindChip, selectedKind === k.kind && s.kindChipActive]}
-                  >
-                    <Text style={s.kindChipText}>
-                      {k.icon} {k.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </Row>
-            </View>
-
-            <Input
-              placeholder={
-                selectedKind === 'grocery'
-                  ? 'e.g. Weekly Groceries'
-                  : selectedKind === 'laundry'
-                  ? 'e.g. Dry Cleaning'
-                  : selectedKind === 'todo'
-                  ? 'e.g. Weekend Chores'
-                  : 'e.g. Diwali Shopping'
-              }
-              value={listName}
-              onChangeText={setListName}
-              autoFocus
-            />
-
-            <Button
-              title="Create list"
-              onPress={() => listName.trim() && create.mutate()}
-              loading={create.isPending}
-            />
-            <Button title="Cancel" variant="ghost" onPress={() => setModalOpen(false)} />
-          </Pressable>
-        </Pressable>
-      </Modal>
+      <Sheet visible={open} onClose={() => setOpen(false)} title="New list">
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space(2) }}>
+          {KINDS.map((k) => <Chip key={k.kind} label={k.label} icon={`list.${k.kind}`} selected={kind === k.kind} onPress={() => setKind(k.kind)} />)}
+        </View>
+        <Input label="Name" placeholder={kindInfo(kind).placeholder} value={name} onChangeText={setName} returnKeyType="done" onSubmitEditing={() => name.trim() && create.mutate()} />
+        <Button title="Create list" fullWidth loading={create.isPending} onPress={() => { if (name.trim()) create.mutate(); }} />
+      </Sheet>
     </Screen>
   );
 }
 
 const s = StyleSheet.create({
-  listCard: {
-    paddingVertical: space(1.75),
-    paddingHorizontal: space(2),
-  },
-  icon: {
-    fontSize: 26,
-  },
-  name: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.ink,
-  },
-  kindLabel: {
-    fontSize: 11,
-    letterSpacing: 0.5,
-    marginTop: 2,
-  },
-  badge: {
-    backgroundColor: '#F3F4F6',
-    paddingHorizontal: space(1.25),
-    paddingVertical: space(0.5),
-    borderRadius: 999,
-  },
-  badgeActive: {
-    backgroundColor: colors.accentSoft,
-  },
-  count: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.muted,
-  },
-  countActive: {
-    color: colors.accent,
-  },
-  addBtn: {
-    backgroundColor: colors.accentSoft,
-    paddingHorizontal: space(1.5),
-    paddingVertical: space(0.75),
-    borderRadius: radius,
-  },
-  addBtnText: {
-    color: colors.accent,
-    fontWeight: '700',
-    fontSize: 14,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.ink,
-    marginBottom: space(0.5),
-  },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: colors.bg,
-    padding: space(2.5),
-    borderTopLeftRadius: radius * 1.5,
-    borderTopRightRadius: radius * 1.5,
-    gap: space(1),
-  },
-  sheetTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.ink,
-  },
-  kindChip: {
-    paddingHorizontal: space(1.5),
-    paddingVertical: space(0.75),
-    borderRadius: radius,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  kindChipActive: {
-    borderColor: colors.accent,
-    backgroundColor: colors.accentSoft,
-  },
-  kindChipText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.ink,
-  },
+  header: { flexDirection: 'row', alignItems: 'flex-end', gap: space(3), marginBottom: space(2) },
+  row: { flexDirection: 'row', alignItems: 'center', gap: space(3), paddingVertical: 14 },
+  tile: { width: 42, height: 42, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
 });

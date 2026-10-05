@@ -22,6 +22,7 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("R2 variables not set: attachments disabled");
     }
     let state = state::AppState::new(pool, cfg.jwt_secret.clone()).with_storage(storage);
+    homesy_api::sweep::spawn(state.clone());
     let app = create_app(state, cfg.cors_origins.as_deref());
 
     let addr = format!("0.0.0.0:{}", cfg.port);

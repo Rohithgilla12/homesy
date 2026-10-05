@@ -1595,3 +1595,44 @@ async fn avatar_and_cover_are_set_through_patch() {
         avatar
     );
 }
+
+#[tokio::test]
+async fn stale_pending_attachments_are_swept() {
+    let Some(storage) = storage_for_tests() else {
+        return;
+    };
+    let (pool, state) = setup_test_db().await;
+    let state = state.with_storage(Some(storage));
+    let app = create_app(state.clone(), None);
+    let (token, home) = signup_and_home(&app).await;
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/attachments"),
+            &token,
+            json!({"kind":"avatar","content_type":"image/png","size_bytes":4}),
+        ))
+        .await
+        .unwrap();
+    let id = Uuid::parse_str(
+        parse_json_response(res.into_body()).await["id"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    sqlx::query("update attachments set created_at = now() - interval '2 days' where id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let n = homesy_api::sweep::delete_stale_pending(&state, chrono::Duration::days(1))
+        .await
+        .unwrap();
+    assert!(n >= 1);
+    let (left,): (i64,) = sqlx::query_as("select count(*) from attachments where id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+}

@@ -1,5 +1,6 @@
 use crate::{
     activity::log_activity,
+    attachments::Kind,
     auth::{ensure_member, AuthUser},
     error::{AppError, AppResult},
     models::{CreateBill, HouseholdBill, NewCycleBill, PayBill, UpdateBill},
@@ -39,6 +40,7 @@ const BILL_SELECT: &str = r#"
         b.created_by,
         b.created_at,
         b.updated_at,
+        b.receipt_id,
         u_paid.display_name as paid_by_name,
         u_created.display_name as created_by_name
     from household_bills b
@@ -65,6 +67,20 @@ async fn fetch_bill_with_names(pool: &sqlx::PgPool, bill_id: Uuid) -> AppResult<
     Ok(bill)
 }
 
+/// Embeds presigned receipt URLs; a no-op when storage is off.
+async fn decorate(s: &AppState, mut bills: Vec<HouseholdBill>) -> AppResult<Vec<HouseholdBill>> {
+    let ids: Vec<Uuid> = bills.iter().filter_map(|b| b.receipt_id).collect();
+    let outs = crate::attachments::outs_for(&s.pool, s.storage.as_deref(), &ids).await?;
+    for b in &mut bills {
+        b.receipt = b.receipt_id.and_then(|id| outs.get(&id).cloned());
+    }
+    Ok(bills)
+}
+
+async fn decorate_one(s: &AppState, bill: HouseholdBill) -> AppResult<HouseholdBill> {
+    Ok(decorate(s, vec![bill]).await?.remove(0))
+}
+
 async fn get_user_display_name(pool: &sqlx::PgPool, uid: Uuid) -> AppResult<String> {
     let (name,): (String,) = sqlx::query_as("select display_name from users where id = $1")
         .bind(uid)
@@ -86,7 +102,7 @@ async fn list_bills(
     .bind(home_id)
     .fetch_all(&s.pool)
     .await?;
-    Ok(Json(bills))
+    Ok(Json(decorate(&s, bills).await?))
 }
 
 async fn create_bill(
@@ -116,12 +132,16 @@ async fn create_bill(
         }
     }
 
+    if let Some(rid) = b.receipt_id {
+        crate::attachments::load_for_owner(&s.pool, rid, home_id, Kind::BillReceipt).await?;
+    }
+
     let bill_id = Uuid::now_v7();
     sqlx::query(
         "insert into household_bills (
             id, home_id, title, category, account_number, amount_cents,
-            due_date, billing_period, is_paid, notes, created_by, created_at, updated_at
-        ) values ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $10, now(), now())",
+            due_date, billing_period, is_paid, notes, created_by, created_at, updated_at, receipt_id
+        ) values ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $10, now(), now(), $11)",
     )
     .bind(bill_id)
     .bind(home_id)
@@ -141,6 +161,7 @@ async fn create_bill(
             .filter(|s| !s.is_empty()),
     )
     .bind(uid)
+    .bind(b.receipt_id)
     .execute(&s.pool)
     .await?;
 
@@ -162,7 +183,7 @@ async fn create_bill(
     )
     .await;
 
-    Ok(Json(bill))
+    Ok(Json(decorate_one(&s, bill).await?))
 }
 
 async fn update_bill(
@@ -229,11 +250,20 @@ async fn update_bill(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .or(existing.notes);
+    let new_receipt_id = match b.receipt_id {
+        Some(Some(rid)) => {
+            crate::attachments::load_for_owner(&s.pool, rid, home_id, Kind::BillReceipt).await?;
+            Some(rid)
+        }
+        Some(None) => None,
+        None => existing.receipt_id,
+    };
 
     sqlx::query(
         "update household_bills
          set title = $1, category = $2, account_number = $3, amount_cents = $4,
-             due_date = $5, billing_period = $6, notes = $7, updated_at = now()
+             due_date = $5, billing_period = $6, notes = $7, updated_at = now(),
+             receipt_id = $9
          where id = $8",
     )
     .bind(&new_title)
@@ -244,8 +274,15 @@ async fn update_bill(
     .bind(&new_billing_period)
     .bind(new_notes)
     .bind(bill_id)
+    .bind(new_receipt_id)
     .execute(&s.pool)
     .await?;
+    if let Some(old) = existing
+        .receipt_id
+        .filter(|old| Some(*old) != new_receipt_id)
+    {
+        crate::routes::attachments::delete_many(&s, &[old]).await?;
+    }
 
     let updated = fetch_bill_with_names(&s.pool, bill_id).await?;
 
@@ -265,7 +302,7 @@ async fn update_bill(
     )
     .await;
 
-    Ok(Json(updated))
+    Ok(Json(decorate_one(&s, updated).await?))
 }
 
 async fn pay_bill(
@@ -340,7 +377,7 @@ async fn pay_bill(
         payload: serde_json::to_value(&updated).unwrap_or_default(),
     });
 
-    Ok(Json(updated))
+    Ok(Json(decorate_one(&s, updated).await?))
 }
 
 async fn unpay_bill(
@@ -371,7 +408,7 @@ async fn unpay_bill(
         payload: serde_json::to_value(&updated).unwrap_or_default(),
     });
 
-    Ok(Json(updated))
+    Ok(Json(decorate_one(&s, updated).await?))
 }
 
 async fn new_cycle_bill(
@@ -432,7 +469,7 @@ async fn new_cycle_bill(
         payload: serde_json::to_value(&updated).unwrap_or_default(),
     });
 
-    Ok(Json(updated))
+    Ok(Json(decorate_one(&s, updated).await?))
 }
 
 async fn delete_bill(
@@ -442,12 +479,15 @@ async fn delete_bill(
 ) -> AppResult<Json<serde_json::Value>> {
     let home_id = bill_home(&s.pool, uid, bill_id).await?;
 
-    let existing: Option<(String,)> =
-        sqlx::query_as("select title from household_bills where id = $1")
+    let existing: Option<(String, Option<Uuid>)> =
+        sqlx::query_as("select title, receipt_id from household_bills where id = $1")
             .bind(bill_id)
             .fetch_optional(&s.pool)
             .await?;
 
+    if let Some((_, Some(rid))) = &existing {
+        crate::routes::attachments::delete_many(&s, &[*rid]).await?;
+    }
     sqlx::query("delete from household_bills where id = $1")
         .bind(bill_id)
         .execute(&s.pool)
@@ -460,7 +500,7 @@ async fn delete_bill(
     });
 
     let desc = match existing {
-        Some((t,)) => format!("Deleted bill \"{}\"", t),
+        Some((t, _)) => format!("Deleted bill \"{}\"", t),
         None => "Deleted bill".to_string(),
     };
     log_activity(&s, home_id, uid, "deleted", "bill", &desc).await;

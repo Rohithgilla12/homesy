@@ -112,6 +112,9 @@ pub struct HouseholdBill {
     pub paid_by_name: Option<String>,
     #[sqlx(default)]
     pub created_by_name: Option<String>,
+    pub receipt_id: Option<Uuid>,
+    #[sqlx(skip)]
+    pub receipt: Option<AttachmentOut>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -123,6 +126,7 @@ pub struct CreateBill {
     pub due_date: Option<NaiveDate>,
     pub billing_period: String,
     pub notes: Option<String>,
+    pub receipt_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -142,6 +146,9 @@ pub struct UpdateBill {
     pub due_date: Option<NaiveDate>,
     pub billing_period: Option<String>,
     pub notes: Option<String>,
+    /// Absent keeps the receipt, `null` clears it, an id replaces it.
+    #[serde(default, deserialize_with = "crate::attachments::double_option")]
+    pub receipt_id: Option<Option<Uuid>>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -171,7 +178,7 @@ pub struct Attachment {
 }
 
 /// What clients see: the row plus a short-lived presigned GET.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttachmentOut {
     pub id: Uuid,
     pub kind: String,

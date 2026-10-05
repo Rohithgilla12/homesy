@@ -1419,3 +1419,68 @@ async fn attachment_rejects_bad_type_and_non_members() {
         .unwrap();
     assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
 }
+
+/// Creates, uploads 4 bytes and completes an attachment; returns its id.
+async fn upload_ready(app: &axum::Router, token: &str, home: &str, kind: &str) -> String {
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/attachments"),
+            token,
+            json!({"kind": kind, "content_type":"image/png","size_bytes":4}),
+        ))
+        .await
+        .unwrap();
+    let created = parse_json_response(res.into_body()).await;
+    reqwest::Client::new()
+        .put(created["upload_url"].as_str().unwrap())
+        .header("content-type", "image/png")
+        .body(vec![1u8, 2, 3, 4])
+        .send()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap().to_string();
+    app.clone()
+        .oneshot(authed("POST", format!("/attachments/{id}/complete"), token))
+        .await
+        .unwrap();
+    id
+}
+
+#[tokio::test]
+async fn bill_receipt_attaches_and_rejects_foreign_attachment() {
+    let Some(storage) = storage_for_tests() else {
+        return;
+    };
+    let (_pool, state) = setup_test_db().await;
+    let app = create_app(state.with_storage(Some(storage)), None);
+    let (token, home) = signup_and_home(&app).await;
+    let (other_token, other_home) = signup_and_home(&app).await;
+    let mine = upload_ready(&app, &token, &home, "bill_receipt").await;
+    let theirs = upload_ready(&app, &other_token, &other_home, "bill_receipt").await;
+
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/bills"),
+            &token,
+            json!({"title":"Gas","category":"gas","billing_period":"Oct","receipt_id": theirs}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "foreign attachment");
+
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/bills"),
+            &token,
+            json!({"title":"Gas","category":"gas","billing_period":"Oct","receipt_id": mine}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bill = parse_json_response(res.into_body()).await;
+    assert_eq!(bill["receipt"]["id"].as_str().unwrap(), mine);
+    assert!(bill["receipt"]["url"].as_str().unwrap().starts_with("http"));
+}

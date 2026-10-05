@@ -6,12 +6,27 @@
   "build": {
     "development": {
       "distribution": "internal",
-      "ios": { "simulator": true },
-      "env": { "EXPO_PUBLIC_API_URL": "http://localhost:8080" }
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "http://localhost:8080"
+      }
     },
     "production": {
       "autoIncrement": true,
-      "env": { "EXPO_PUBLIC_API_URL": "https://homesy-api.gilla.fun" }
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://homesy-api.gilla.fun"
+      }
+    },
+    "preview-simulator": {
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://homesy-api.gilla.fun"
+      }
     }
   },
   "submit": {

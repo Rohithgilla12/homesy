@@ -9,6 +9,9 @@ pub struct User {
     pub email: String,
     pub display_name: String,
     pub created_at: DateTime<Utc>,
+    pub avatar_id: Option<Uuid>,
+    #[sqlx(skip)]
+    pub avatar: Option<AttachmentOut>,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -19,6 +22,9 @@ pub struct Home {
     pub invite_code: String,
     pub created_by: Uuid,
     pub created_at: DateTime<Utc>,
+    pub cover_id: Option<Uuid>,
+    #[sqlx(skip)]
+    pub cover: Option<AttachmentOut>,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -28,6 +34,9 @@ pub struct Member {
     pub email: String,
     pub role: String,
     pub joined_at: DateTime<Utc>,
+    pub avatar_id: Option<Uuid>,
+    #[sqlx(skip)]
+    pub avatar: Option<AttachmentOut>,
 }
 
 #[derive(Debug, Serialize, FromRow)]

@@ -1,5 +1,6 @@
 use crate::{
     activity::log_activity,
+    attachments::Kind,
     auth::{ensure_member, AuthUser},
     error::{AppError, AppResult},
     models::{Activity, Home, Member},
@@ -18,7 +19,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/homes", get(list_homes).post(create_home))
         .route("/homes/join", post(join_home))
-        .route("/homes/{id}", get(get_home))
+        .route("/homes/{id}", get(get_home).patch(update_home))
         .route("/homes/{id}/leave", post(leave_home))
         .route("/homes/{id}/activity", get(get_home_activity))
         .route("/homes/{id}/events", get(home_events))
@@ -42,7 +43,7 @@ struct HomeDetail {
     members: Vec<Member>,
 }
 
-const HOME_COLS: &str = "id, name, emoji, invite_code, created_by, created_at";
+const HOME_COLS: &str = "id, name, emoji, invite_code, created_by, created_at, cover_id";
 
 /// Ambiguity-free, shouting-friendly code: no 0/O/1/I.
 pub(crate) fn gen_invite_code() -> String {
@@ -58,7 +59,7 @@ async fn list_homes(
     AuthUser(uid): AuthUser,
 ) -> AppResult<Json<Vec<Home>>> {
     let homes: Vec<Home> = sqlx::query_as(
-        "select h.id, h.name, h.emoji, h.invite_code, h.created_by, h.created_at
+        "select h.id, h.name, h.emoji, h.invite_code, h.created_by, h.created_at, h.cover_id
            from homes h
            join home_members m on m.home_id = h.id
           where m.user_id = $1
@@ -67,7 +68,7 @@ async fn list_homes(
     .bind(uid)
     .fetch_all(&s.pool)
     .await?;
-    Ok(Json(homes))
+    Ok(Json(decorate_homes(&s, homes).await?))
 }
 
 async fn create_home(
@@ -127,7 +128,7 @@ async fn create_home(
     }
 
     tx.commit().await?;
-    Ok(Json(home))
+    Ok(Json(decorate_home(&s, home).await?))
 }
 
 async fn join_home(
@@ -162,7 +163,7 @@ async fn join_home(
 
     log_activity(&s, home_id, uid, "joined", "member", "Joined the home").await;
 
-    Ok(Json(home))
+    Ok(Json(decorate_home(&s, home).await?))
 }
 
 async fn get_home(
@@ -176,14 +177,106 @@ async fn get_home(
         .fetch_one(&s.pool)
         .await?;
     let members: Vec<Member> = sqlx::query_as(
-        "select m.user_id, u.display_name, u.email, m.role, m.joined_at
+        "select m.user_id, u.display_name, u.email, m.role, m.joined_at, u.avatar_id
            from home_members m join users u on u.id = m.user_id
           where m.home_id = $1 order by m.joined_at",
     )
     .bind(home_id)
     .fetch_all(&s.pool)
     .await?;
+    let home = decorate_home(&s, home).await?;
+    let members = decorate_members(&s, members).await?;
     Ok(Json(HomeDetail { home, members }))
+}
+
+/// Embeds presigned cover URLs; a no-op when storage is off.
+async fn decorate_homes(s: &AppState, mut homes: Vec<Home>) -> AppResult<Vec<Home>> {
+    let ids: Vec<Uuid> = homes.iter().filter_map(|h| h.cover_id).collect();
+    let outs = crate::attachments::outs_for(&s.pool, s.storage.as_deref(), &ids).await?;
+    for h in &mut homes {
+        h.cover = h.cover_id.and_then(|id| outs.get(&id).cloned());
+    }
+    Ok(homes)
+}
+
+async fn decorate_home(s: &AppState, home: Home) -> AppResult<Home> {
+    Ok(decorate_homes(s, vec![home]).await?.remove(0))
+}
+
+async fn decorate_members(s: &AppState, mut members: Vec<Member>) -> AppResult<Vec<Member>> {
+    let ids: Vec<Uuid> = members.iter().filter_map(|m| m.avatar_id).collect();
+    let outs = crate::attachments::outs_for(&s.pool, s.storage.as_deref(), &ids).await?;
+    for m in &mut members {
+        m.avatar = m.avatar_id.and_then(|id| outs.get(&id).cloned());
+    }
+    Ok(members)
+}
+
+#[derive(Deserialize)]
+struct UpdateHome {
+    name: Option<String>,
+    emoji: Option<String>,
+    /// Absent keeps the cover, `null` clears it, an id replaces it.
+    #[serde(default, deserialize_with = "crate::attachments::double_option")]
+    cover_id: Option<Option<Uuid>>,
+}
+
+/// Owners only: rename, re-emoji or change the cover photo.
+async fn update_home(
+    State(s): State<AppState>,
+    AuthUser(uid): AuthUser,
+    Path(home_id): Path<Uuid>,
+    Json(b): Json<UpdateHome>,
+) -> AppResult<Json<Home>> {
+    ensure_member(&s.pool, uid, home_id).await?;
+    let (role,): (String,) =
+        sqlx::query_as("select role from home_members where home_id = $1 and user_id = $2")
+            .bind(home_id)
+            .bind(uid)
+            .fetch_one(&s.pool)
+            .await?;
+    if role != "owner" {
+        return Err(AppError::Forbidden);
+    }
+    let current: Home = sqlx::query_as(&format!("select {HOME_COLS} from homes where id = $1"))
+        .bind(home_id)
+        .fetch_one(&s.pool)
+        .await?;
+    let name = match b.name {
+        Some(n) if !n.trim().is_empty() => n.trim().to_string(),
+        _ => current.name.clone(),
+    };
+    let emoji = b
+        .emoji
+        .filter(|e| !e.trim().is_empty())
+        .unwrap_or(current.emoji.clone());
+    let cover_id = match b.cover_id {
+        Some(Some(id)) => {
+            crate::attachments::load_for_owner(&s.pool, id, home_id, Kind::HomeCover).await?;
+            Some(id)
+        }
+        Some(None) => None,
+        None => current.cover_id,
+    };
+    let home: Home = sqlx::query_as(&format!(
+        "update homes set name = $1, emoji = $2, cover_id = $3 where id = $4 returning {HOME_COLS}"
+    ))
+    .bind(&name)
+    .bind(&emoji)
+    .bind(cover_id)
+    .bind(home_id)
+    .fetch_one(&s.pool)
+    .await?;
+    if let Some(old) = current.cover_id.filter(|old| Some(*old) != cover_id) {
+        crate::routes::attachments::delete_many(&s, &[old]).await?;
+    }
+    let home = decorate_home(&s, home).await?;
+    s.broadcast(crate::models::HomeEvent {
+        home_id,
+        event_type: "home_updated".into(),
+        payload: serde_json::to_value(&home).unwrap_or_default(),
+    });
+    Ok(Json(home))
 }
 
 async fn leave_home(

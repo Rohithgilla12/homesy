@@ -1542,3 +1542,56 @@ async fn vault_entry_documents_replace_and_cascade() {
         .unwrap();
     assert_eq!(n, 0, "entry delete removes its documents");
 }
+
+#[tokio::test]
+async fn avatar_and_cover_are_set_through_patch() {
+    let Some(storage) = storage_for_tests() else {
+        return;
+    };
+    let (_pool, state) = setup_test_db().await;
+    let app = create_app(state.with_storage(Some(storage)), None);
+    let (token, home) = signup_and_home(&app).await;
+    let avatar = upload_ready(&app, &token, &home, "avatar").await;
+    let cover = upload_ready(&app, &token, &home, "home_cover").await;
+
+    let patch = |uri: String, body: Value| {
+        Request::builder()
+            .method("PATCH")
+            .uri(uri)
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+
+    let res = app
+        .clone()
+        .oneshot(patch("/me".into(), json!({"avatar_id": avatar})))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        parse_json_response(res.into_body()).await["avatar"]["id"]
+            .as_str()
+            .unwrap(),
+        avatar
+    );
+
+    let res = app
+        .clone()
+        .oneshot(patch(format!("/homes/{home}"), json!({"cover_id": cover})))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .oneshot(authed("GET", format!("/homes/{home}"), &token))
+        .await
+        .unwrap();
+    let detail = parse_json_response(res.into_body()).await;
+    assert_eq!(detail["cover"]["id"].as_str().unwrap(), cover);
+    assert_eq!(
+        detail["members"][0]["avatar"]["id"].as_str().unwrap(),
+        avatar
+    );
+}

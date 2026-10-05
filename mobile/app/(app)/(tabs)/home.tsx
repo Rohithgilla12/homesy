@@ -4,10 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, ScrollView, Share, StyleSheet, Switch, View } from 'react-native';
 import { api } from '@/api/client';
 import { friendlyError } from '@/lib/errors';
+import { useCelebrate } from '@/store/celebrate';
 import { useActiveHome } from '@/store/home';
 import { useSession } from '@/store/session';
 import {
-  Avatar, Button, Card, Chip, Confetti, HOME_EMOJI, IconButton, Input, Pill, Screen, Sheet, Text, color, radius, space, status,
+  Avatar, Button, Card, Chip, HOME_EMOJI, IconButton, Input, Pill, Screen, Sheet, Text, color, radius, space, status,
 } from '@/ui';
 
 export default function HomeScreen() {
@@ -20,7 +21,7 @@ export default function HomeScreen() {
   const [code, setCode] = useState('');
   const [copied, setCopied] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [celebrate, setCelebrate] = useState(0);
+  const celebrate = useCelebrate((s) => s.fire);
 
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [noticeTitle, setNoticeTitle] = useState('');
@@ -38,7 +39,7 @@ export default function HomeScreen() {
     const n = detail.members.length;
     const prev = memberCount.current;
     const iOwn = detail.members.some((m) => m.user_id === user?.id && m.role === 'owner');
-    if (prev.home === detail.id && n > prev.n && iOwn) setCelebrate((c) => c + 1);
+    if (prev.home === detail.id && n > prev.n && iOwn) celebrate();
     memberCount.current = { home: detail.id, n };
   }, [detail, user?.id]);
 
@@ -68,7 +69,7 @@ export default function HomeScreen() {
   };
   const create = useMutation({
     mutationFn: () => api.createHome({ name: name.trim(), emoji }),
-    onSuccess: (h) => { if (onboarding) setCelebrate((c) => c + 1); afterChange(h.id); },
+    onSuccess: (h) => { if (onboarding) celebrate(); afterChange(h.id); },
     onError: (e) => setFormError(friendlyError(e, 'generic')),
   });
   const join = useMutation({
@@ -140,7 +141,6 @@ export default function HomeScreen() {
         {createCard}
         {joinCard}
         {accountCard}
-        <Confetti fire={celebrate} />
       </Screen>
     );
   }
@@ -255,7 +255,6 @@ export default function HomeScreen() {
         </View>
         <Button title="Post note" fullWidth loading={createNotice.isPending} onPress={() => { if (noticeTitle.trim()) createNotice.mutate(); }} />
       </Sheet>
-      <Confetti fire={celebrate} />
     </>
   );
 }

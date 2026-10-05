@@ -15,7 +15,8 @@ import { useActiveHome } from '@/store/home';
 import { useSession } from '@/store/session';
 import {
   AnimatedCheck, Button, Card, Chip, EmptyState, Icon, IconButton, Input, LiveRow, Pill, Screen, Sheet, StrikeText, Text,
-  color, font, haptic, motion, radius, space, status, type as typo,
+  color, haptic, motion, radius, space, status, type as typo,
+  useManualRefresh,
 } from '@/ui';
 
 const TICK_MS = 340; // let the check draw and the strike sweep before the row moves to Done
@@ -41,7 +42,8 @@ export default function ListDetailScreen() {
   const [editDone, setEditDone] = useState(false);
 
   const key = ['items', id];
-  const { data: items = [], refetch, isRefetching, isSuccess } = useQuery({ queryKey: key, queryFn: () => api.items(id) });
+  const { data: items = [], refetch, isSuccess } = useQuery({ queryKey: key, queryFn: () => api.items(id) });
+  const { refreshing, onRefresh } = useManualRefresh(refetch);
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: key });
     qc.invalidateQueries({ queryKey: ['lists', homeId] });
@@ -116,8 +118,8 @@ export default function ListDetailScreen() {
     <>
       <Stack.Screen
         options={{
-          title: name ?? 'List',
-          headerTitleStyle: { fontFamily: font.semibold, color: color.ink },
+          // The display title below the header is the name; a nav-bar title would show it twice.
+          title: '',
           headerRight: () => (done.length > 0 ? (
             <Button
               title={`Clear done (${done.length})`}
@@ -131,7 +133,7 @@ export default function ListDetailScreen() {
           ) : null),
         }}
       />
-      <Screen scroll refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={color.accent} />}>
+      <Screen scroll refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={color.accent} />}>
         <View>
           <Text variant="display" style={{ fontSize: 30, lineHeight: 36 }}>{name ?? 'List'}</Text>
           <Text tone="muted">{open.length} to get</Text>
@@ -212,7 +214,7 @@ export default function ListDetailScreen() {
           <Text variant="headline">Completed</Text>
           <Switch value={editDone} onValueChange={setEditDone} trackColor={{ true: color.accent }} accessibilityLabel="Completed" />
         </View>
-        <Button title="Save changes" fullWidth loading={edit.isPending} onPress={() => edit.mutate()} />
+        <Button title="Save changes" fullWidth loading={edit.isPending} disabled={!editTitle.trim()} onPress={() => { if (editTitle.trim()) edit.mutate(); }} />
         <Button title="Delete item" variant="danger" fullWidth onPress={() => editing && confirmDelete(editing)} />
       </Sheet>
     </>

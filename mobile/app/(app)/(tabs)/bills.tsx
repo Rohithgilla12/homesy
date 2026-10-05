@@ -12,6 +12,7 @@ import { useSession } from '@/store/session';
 import {
   Button, Card, Chip, CountUp, DateField, EmptyState, Icon, IconButton, Input, PaidStamp, Pill, Pressable, Screen, Sheet, Text,
   category, color, radius, space, status, useRoofRefresh,
+  useManualRefresh,
 } from '@/ui';
 
 const CATEGORIES: BillCategory[] = ['electricity', 'internet', 'water', 'gas', 'maintenance', 'maid', 'other'];
@@ -49,8 +50,8 @@ export default function BillsScreen() {
   const [cError, setCError] = useState<string | null>(null);
 
   const { data: home } = useQuery({ queryKey: ['home', homeId], queryFn: () => api.home(homeId!), enabled: !!homeId });
-  const { data: bills = [], refetch, isRefetching } = useQuery({ queryKey: ['bills', homeId], queryFn: () => api.bills(homeId!), enabled: !!homeId });
-  const { onScroll, refreshControl, indicator } = useRoofRefresh({ refreshing: isRefetching, onRefresh: refetch });
+  const { data: bills = [], refetch } = useQuery({ queryKey: ['bills', homeId], queryFn: () => api.bills(homeId!), enabled: !!homeId });
+  const { onScroll, refreshControl, indicator } = useRoofRefresh(useManualRefresh(refetch));
   const members = home?.members ?? [];
 
   const invalidate = () => {

@@ -229,7 +229,8 @@ async fn update_item(
         where id = $1 returning {ITEM_COLS}"
     ))
     .bind(item_id)
-    .bind(b.title.as_deref().map(str::trim))
+    // A blank title keeps the old one, like every other PATCH field.
+    .bind(b.title.as_deref().map(str::trim).filter(|t| !t.is_empty()))
     .bind(b.qty)
     .bind(b.note)
     .bind(b.done)

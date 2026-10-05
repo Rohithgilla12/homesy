@@ -1,9 +1,13 @@
 const DAY_MS = 86_400_000;
+const VERBS = /^(Added|Created|Updated|Deleted|Completed|Cleared|Posted|Joined|Left|Marked|Reopened|Removed|Pinned|Unpinned|Started|Rolled|Paid)\b/;
 
 /** Older bill descriptions already start with the actor's name; show it once. */
 export function activitySentence(actorName: string, description: string): { actor: string; text: string } {
   const prefix = `${actorName} `;
-  const text = actorName && description.startsWith(prefix) ? description.slice(prefix.length) : description;
+  let text = actorName && description.startsWith(prefix) ? description.slice(prefix.length) : description;
+  // The server capitalises descriptions ("Added bill …"); after the bold name they read as one sentence.
+  // Only the verbs the server emits are lowercased, so a leading name or acronym stays as written.
+  if (actorName && VERBS.test(text)) text = text[0].toLowerCase() + text.slice(1);
   return { actor: actorName, text };
 }
 

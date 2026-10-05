@@ -9,6 +9,7 @@ import { friendlyError } from '@/lib/errors';
 import { useActiveHome } from '@/store/home';
 import {
   Button, Card, Chip, EmptyState, Icon, Input, Pill, Screen, Sheet, Text, category, color, radius, space, useRoofRefresh,
+  useManualRefresh,
 } from '@/ui';
 
 const KINDS: { kind: ListKind; label: string; caption: string; placeholder: string }[] = [
@@ -26,8 +27,8 @@ export default function ListsScreen() {
   const [kind, setKind] = useState<ListKind>('custom');
   const [name, setName] = useState('');
 
-  const { data: lists = [], refetch, isRefetching } = useQuery({ queryKey: ['lists', homeId], queryFn: () => api.lists(homeId!), enabled: !!homeId });
-  const { onScroll, refreshControl, indicator } = useRoofRefresh({ refreshing: isRefetching, onRefresh: refetch });
+  const { data: lists = [], refetch } = useQuery({ queryKey: ['lists', homeId], queryFn: () => api.lists(homeId!), enabled: !!homeId });
+  const { onScroll, refreshControl, indicator } = useRoofRefresh(useManualRefresh(refetch));
 
   const create = useMutation({
     mutationFn: () => api.createList(homeId!, { kind, name: name.trim() }),

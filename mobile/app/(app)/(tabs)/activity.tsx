@@ -8,7 +8,7 @@ import { activitySentence, groupByDay, isFreshFromOthers } from '@/lib/activity'
 import { relativeTime } from '@/lib/format';
 import { useActiveHome } from '@/store/home';
 import { useSession } from '@/store/session';
-import { Card, EmptyState, Icon, type IconName, LiveRow, Screen, Text, color, radius, space, status } from '@/ui';
+import { Card, EmptyState, Icon, type IconName, LiveRow, Screen, Text, color, radius, space, status, useManualRefresh } from '@/ui';
 
 function iconFor(a: Activity): { name: IconName; bg: string; fg: string } {
   switch (a.resource_type) {
@@ -47,11 +47,13 @@ export default function ActivityScreen() {
   const me = useSession((s) => s.user);
 
   const { data: home } = useQuery({ queryKey: ['home', homeId], queryFn: () => api.home(homeId!), enabled: !!homeId });
-  const { data: activities = [], refetch, isRefetching, isSuccess } = useQuery({
+  const { data: activities = [], refetch, isSuccess } = useQuery({
     queryKey: ['activity', homeId],
     queryFn: () => api.activity(homeId!, 50),
     enabled: !!homeId,
   });
+
+  const { refreshing, onRefresh } = useManualRefresh(refetch);
 
   // Rows present on first load never highlight; only later arrivals from other members do.
   const seen = useRef<Set<string> | null>(null);
@@ -73,7 +75,7 @@ export default function ActivityScreen() {
         keyExtractor={(rows) => rows[0].id}
         stickySectionHeadersEnabled={false}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={color.accent} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={color.accent} />}
         contentContainerStyle={{ paddingTop: space(2), paddingBottom: space(8) }}
         ListHeaderComponent={
           <View style={s.header}>

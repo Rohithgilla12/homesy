@@ -10,6 +10,7 @@ import { useActiveHome } from '@/store/home';
 import {
   BlurReveal, Button, Card, Chip, EmptyState, Icon, IconButton, Input, Pill, Pressable, Screen, Sheet, Text,
   category, color, radius, space, status,
+  useManualRefresh,
 } from '@/ui';
 
 const CATEGORIES = Object.keys(VAULT_CATEGORY_LABEL) as VaultCategory[];
@@ -29,7 +30,8 @@ export default function VaultScreen() {
   const key = ['vault', homeId];
 
   const { data: home } = useQuery({ queryKey: ['home', homeId], queryFn: () => api.home(homeId!), enabled: !!homeId });
-  const { data: entries = [], refetch, isRefetching } = useQuery({ queryKey: key, queryFn: () => api.vault(homeId!), enabled: !!homeId });
+  const { data: entries = [], refetch } = useQuery({ queryKey: key, queryFn: () => api.vault(homeId!), enabled: !!homeId });
+  const { refreshing, onRefresh } = useManualRefresh(refetch);
 
   const [filter, setFilter] = useState<'all' | VaultCategory>('all');
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
@@ -94,6 +96,12 @@ export default function VaultScreen() {
     const cleaned = e.label.replace(/wi-?fi/gi, '').replace(/password/gi, '').replace(/credentials/gi, '').replace(/code/gi, '').replace(/pass/gi, '').trim();
     setSsid(cleaned || `${home?.name || 'Home'} Wi-Fi`);
   };
+  const copyWifi = async () => {
+    if (!wifi) return;
+    await Clipboard.setStringAsync(wifi.value);
+    setWifiCopied(true);
+    setTimeout(() => setWifiCopied(false), 2000);
+  };
   const confirmDelete = (e: VaultEntry) => Alert.alert('Delete detail?', `Delete "${e.label}"?`, [
     { text: 'Cancel', style: 'cancel' },
     { text: 'Delete', style: 'destructive', onPress: () => remove.mutate(e.id) },
@@ -128,9 +136,9 @@ export default function VaultScreen() {
             {e.is_secret ? <Pill label="Hidden" tone="neutral" /> : null}
           </View>
           {e.is_secret ? (
-            <View style={{ gap: space(1) }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: space(2), flexWrap: 'wrap' }}>
               <BlurReveal masked="••••••••••" secret={e.value} revealed={isOpen} />
-              <Button title={isOpen ? 'Hide' : 'Show'} icon={isOpen ? 'hide' : 'reveal'} size="sm" variant="ghost" onPress={() => reveal(e.id)} style={{ alignSelf: 'flex-start' }} />
+              <Button title={isOpen ? 'Hide' : 'Show'} icon={isOpen ? 'hide' : 'reveal'} size="sm" variant="ghost" onPress={() => reveal(e.id)} />
             </View>
           ) : (
             <Text selectable>{e.value}</Text>
@@ -142,7 +150,7 @@ export default function VaultScreen() {
             </View>
           ) : null}
         </View>
-        <View style={{ gap: space(1) }}>
+        <View style={{ flexDirection: 'row', gap: space(1) }}>
           {!w ? <IconButton icon={copied === e.id ? 'copied' : 'copy'} label={`Copy ${e.label}`} tint={copied === e.id ? status.ok : undefined} onPress={() => copy(e)} /> : null}
           <IconButton icon="edit" label={`Edit ${e.label}`} onPress={() => openEdit(e)} />
         </View>
@@ -174,7 +182,7 @@ export default function VaultScreen() {
 
   return (
     <>
-      <Screen scroll refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={color.accent} />}>
+      <Screen scroll refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={color.accent} />}>
         <View style={s.header}>
           <View style={{ flex: 1 }}>
             <Text variant="display">Vault</Text>
@@ -228,18 +236,14 @@ export default function VaultScreen() {
           <Text variant="label" tone="muted">Scan with the phone camera to connect</Text>
         </Card>
         <Input label="Network name (SSID)" value={ssid} onChangeText={setSsid} />
-        <View style={[s.passwordRow]}>
-          <View style={{ flex: 1 }}>
+        <View style={s.passwordRow}>
+          <View style={{ flex: 1, minWidth: 0 }}>
             <Text variant="caption" tone="muted">Password</Text>
             <Text variant="mono" selectable>{wifi?.value}</Text>
           </View>
+          <IconButton icon={wifiCopied ? 'copied' : 'copy'} label="Copy Wi-Fi password" tint={wifiCopied ? status.ok : undefined} onPress={copyWifi} />
         </View>
-        <Button
-          title={wifiCopied ? 'Password copied' : 'Copy Wi-Fi password'}
-          icon={wifiCopied ? 'copied' : 'copy'}
-          fullWidth
-          onPress={async () => { if (!wifi) return; await Clipboard.setStringAsync(wifi.value); setWifiCopied(true); setTimeout(() => setWifiCopied(false), 2000); }}
-        />
+        <Button title={wifiCopied ? 'Password copied' : 'Copy Wi-Fi password'} icon={wifiCopied ? 'copied' : 'copy'} fullWidth onPress={copyWifi} />
       </Sheet>
     </>
   );
@@ -251,5 +255,5 @@ const s = StyleSheet.create({
   entryLast: { borderBottomWidth: 0 },
   tile: { width: 40, height: 40, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
   switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  passwordRow: { backgroundColor: color.surfaceSunk, borderRadius: radius.md, padding: space(3) },
+  passwordRow: { flexDirection: 'row', alignItems: 'center', gap: space(2), backgroundColor: color.surfaceSunk, borderRadius: radius.md, paddingVertical: space(2), paddingLeft: space(3), paddingRight: space(2) },
 });

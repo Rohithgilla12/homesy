@@ -5,8 +5,13 @@ describe('activitySentence', () => {
     expect(activitySentence('Ananya', 'Ananya marked Rent as PAID')).toEqual({ actor: 'Ananya', text: 'marked Rent as PAID' });
     expect(activitySentence('Rohith Gilla', 'Rohith Gilla rolled over "Wi-Fi" to Nov')).toEqual({ actor: 'Rohith Gilla', text: 'rolled over "Wi-Fi" to Nov' });
   });
-  it('leaves descriptions without the name untouched', () => {
-    expect(activitySentence('Ananya', 'Added bill "Water"')).toEqual({ actor: 'Ananya', text: 'Added bill "Water"' });
+  it('lowercases the leading verb so it reads on from the name', () => {
+    expect(activitySentence('Ananya', 'Added bill "Water"')).toEqual({ actor: 'Ananya', text: 'added bill "Water"' });
+    expect(activitySentence('Ananya', 'Ananya Joined the home')).toEqual({ actor: 'Ananya', text: 'joined the home' });
+  });
+  it('keeps a leading acronym or name intact', () => {
+    expect(activitySentence('Ananya', 'BESCOM bill paid')).toEqual({ actor: 'Ananya', text: 'BESCOM bill paid' });
+    expect(activitySentence('', 'Added bill "Water"')).toEqual({ actor: '', text: 'Added bill "Water"' });
   });
   it('does not strip partial name matches', () => {
     expect(activitySentence('Ro', 'Rohith paid')).toEqual({ actor: 'Ro', text: 'Rohith paid' });

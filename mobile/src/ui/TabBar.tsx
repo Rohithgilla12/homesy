@@ -43,7 +43,7 @@ export function TabBar({ state, navigation }: TabBarProps) {
             <View style={[s.pill, selected && s.pillOn]}>
               <Icon name={tab.icon} size={22} tint={tint} />
             </View>
-            <Text variant="label" color={tint} style={{ textAlign: 'center' }}>{tab.label}</Text>
+            <Text variant="label" color={tint} style={{ textAlign: 'center' }} numberOfLines={1} maxFontSizeMultiplier={1.3}>{tab.label}</Text>
           </Pressable>
         );
       })}

@@ -4,13 +4,16 @@ import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '@/api/client';
 import { useHomeEvents } from '@/api/events';
+import { useCelebrate } from '@/store/celebrate';
 import { useActiveHome } from '@/store/home';
+import { Confetti } from '@/ui/motion/Confetti';
 import { color, font } from '@/ui/tokens';
 import Onboarding from './(tabs)/home';
 
 export default function AppLayout() {
   const { data: homes, isLoading } = useQuery({ queryKey: ['homes'], queryFn: api.homes });
   const activeHomeId = useActiveHome((s) => s.activeHomeId);
+  const celebrate = useCelebrate((s) => s.count);
 
   // Realtime SSE sync: invalidates caches on changes while viewing active home
   useHomeEvents(activeHomeId);
@@ -22,15 +25,19 @@ export default function AppLayout() {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: color.bg }} edges={['top', 'bottom']}>
         <Onboarding />
+        <Confetti fire={celebrate} />
       </SafeAreaView>
     );
   }
 
+  // The confetti overlay sits above the whole stack so a burst outlives the screen that fired it.
   return (
-    <Stack screenOptions={{ headerStyle: { backgroundColor: color.bg }, headerShadowVisible: false, headerTintColor: color.accentInk, headerTitleStyle: { fontFamily: font.semibold, color: color.ink } }}>
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="lists/[id]" options={{ headerBackTitle: 'Lists' }} />
-    </Stack>
+    <View style={{ flex: 1 }}>
+      <Stack screenOptions={{ headerStyle: { backgroundColor: color.bg }, headerShadowVisible: false, headerTintColor: color.accentInk, headerTitleStyle: { fontFamily: font.semibold, color: color.ink } }}>
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="lists/[id]" options={{ headerBackTitle: 'Lists' }} />
+      </Stack>
+      <Confetti fire={celebrate} />
+    </View>
   );
 }
-

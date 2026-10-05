@@ -157,3 +157,26 @@ pub struct HomeEvent {
     pub event_type: String,
     pub payload: serde_json::Value,
 }
+
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct Attachment {
+    pub id: Uuid,
+    pub home_id: Uuid,
+    pub uploaded_by: Uuid,
+    pub kind: String,
+    pub content_type: String,
+    pub size_bytes: i64,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// What clients see: the row plus a short-lived presigned GET.
+#[derive(Debug, Clone, Serialize)]
+pub struct AttachmentOut {
+    pub id: Uuid,
+    pub kind: String,
+    pub content_type: String,
+    pub size_bytes: i64,
+    pub url: String,
+    pub url_expires_at: DateTime<Utc>,
+}

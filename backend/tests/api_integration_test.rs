@@ -1211,3 +1211,211 @@ async fn test_health_reports_unreachable_database_promptly() {
     let body = parse_json_response(res.into_body()).await;
     assert_eq!(body["error"], "database unavailable");
 }
+
+fn storage_for_tests() -> Option<homesy_api::storage::Storage> {
+    // CI runs MinIO; locally `docker compose up -d` starts it too. Without it these tests return early.
+    let endpoint = std::env::var("S3_ENDPOINT").ok()?;
+    Some(homesy_api::storage::Storage::new(
+        endpoint,
+        "homesy".into(),
+        "homesyhomesy".into(),
+        "homesy-test".into(),
+    ))
+}
+
+async fn signup_and_home(app: &axum::Router) -> (String, String) {
+    let email = format!("att_{}@example.com", Uuid::now_v7());
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/signup")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"email": email, "password": "password123", "display_name": "Att"})
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let token = parse_json_response(res.into_body()).await["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/homes")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"name": "Att Home"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let home = parse_json_response(res.into_body()).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    (token, home)
+}
+
+fn json_post(uri: String, token: &str, body: Value) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+fn authed(method: &str, uri: String, token: &str) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap()
+}
+
+#[tokio::test]
+async fn attachments_are_disabled_without_storage() {
+    let (_pool, state) = setup_test_db().await;
+    let app = create_app(state, None);
+    let (token, home) = signup_and_home(&app).await;
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/config")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        parse_json_response(res.into_body()).await["attachments"],
+        json!(false)
+    );
+    let res = app
+        .oneshot(json_post(
+            format!("/homes/{home}/attachments"),
+            &token,
+            json!({"kind":"bill_receipt","content_type":"image/jpeg","size_bytes":10}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn attachment_create_complete_read_delete() {
+    let Some(storage) = storage_for_tests() else {
+        return;
+    };
+    let (_pool, state) = setup_test_db().await;
+    let app = create_app(state.with_storage(Some(storage)), None);
+    let (token, home) = signup_and_home(&app).await;
+
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/attachments"),
+            &token,
+            json!({"kind":"bill_receipt","content_type":"image/png","size_bytes":4}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = parse_json_response(res.into_body()).await;
+    let id = created["id"].as_str().unwrap().to_string();
+    let upload_url = created["upload_url"].as_str().unwrap().to_string();
+
+    let res = app
+        .clone()
+        .oneshot(authed(
+            "POST",
+            format!("/attachments/{id}/complete"),
+            &token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT, "complete before upload");
+
+    let client = reqwest::Client::new();
+    let put = client
+        .put(&upload_url)
+        .header("content-type", "image/png")
+        .body(vec![1u8, 2, 3, 4])
+        .send()
+        .await
+        .unwrap();
+    assert!(put.status().is_success(), "{}", put.status());
+
+    let res = app
+        .clone()
+        .oneshot(authed(
+            "POST",
+            format!("/attachments/{id}/complete"),
+            &token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let out = parse_json_response(res.into_body()).await;
+    assert_eq!(out["size_bytes"], json!(4));
+    let get = client
+        .get(out["url"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(get.bytes().await.unwrap().to_vec(), vec![1u8, 2, 3, 4]);
+
+    let res = app
+        .clone()
+        .oneshot(authed("DELETE", format!("/attachments/{id}"), &token))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let get = client
+        .get(out["url"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(get.status(), 404);
+}
+
+#[tokio::test]
+async fn attachment_rejects_bad_type_and_non_members() {
+    let Some(storage) = storage_for_tests() else {
+        return;
+    };
+    let (_pool, state) = setup_test_db().await;
+    let app = create_app(state.with_storage(Some(storage)), None);
+    let (token, home) = signup_and_home(&app).await;
+    let (other_token, _other_home) = signup_and_home(&app).await;
+    let bad = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/attachments"),
+            &token,
+            json!({"kind":"avatar","content_type":"application/pdf","size_bytes":10}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+    let forbidden = app
+        .oneshot(json_post(
+            format!("/homes/{home}/attachments"),
+            &other_token,
+            json!({"kind":"avatar","content_type":"image/png","size_bytes":10}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+}

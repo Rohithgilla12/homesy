@@ -11,3 +11,5 @@ export { Chip } from './Chip';
 export { Avatar } from './Avatar';
 export { EmptyState } from './EmptyState';
 export { Screen } from './Screen';
+export { Input } from './Input';
+export { DateField, toIsoDate } from './DateField';

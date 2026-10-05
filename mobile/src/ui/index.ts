@@ -15,3 +15,6 @@ export { Input } from './Input';
 export { DateField, toIsoDate } from './DateField';
 export { Sheet } from './Sheet';
 export * from './motion';
+export { AppHeader } from './AppHeader';
+export { TabBar } from './TabBar';
+export { HomeSwitcherSheet, HOME_EMOJI } from './HomeSwitcherSheet';

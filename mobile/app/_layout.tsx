@@ -9,15 +9,18 @@ import { Redirect, Slot, usePathname } from 'expo-router';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useActiveHome } from '@/store/home';
 import { useSession } from '@/store/session';
+import { ColdStart } from '@/ui/motion';
 import { color } from '@/ui/tokens';
 
 // Keep the native splash up until the session and fonts are ready, so nothing paints in a fallback font.
 SplashScreen.preventAutoHideAsync().catch(() => {});
+// The roof-drawing flourish plays once per process, not on every remount.
+let coldStartPlayed = false;
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -47,6 +50,7 @@ export default function Root() {
 
   const [fontsLoaded, fontError] = useFonts({ BricolageGrotesque_700Bold, Geist_400Regular, Geist_500Medium, Geist_600SemiBold, GeistMono_500Medium });
   const ready = hydrated && (fontsLoaded || !!fontError);
+  const [showColdStart, setShowColdStart] = useState(!coldStartPlayed);
 
   useEffect(() => { hydrate(); hydrateHome(); }, []);
   useEffect(() => { if (fontError) console.warn('font load failed', fontError); }, [fontError]);
@@ -63,6 +67,7 @@ export default function Root() {
         <QueryClientProvider client={qc}>
           <StatusBar style="dark" />
           <Slot />
+          {showColdStart ? <ColdStart onDone={() => { coldStartPlayed = true; setShowColdStart(false); }} /> : null}
         </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

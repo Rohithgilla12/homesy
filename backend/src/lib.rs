@@ -5,6 +5,7 @@ pub mod error;
 pub mod models;
 pub mod routes;
 pub mod state;
+pub mod storage;
 
 use axum::{
     extract::State,

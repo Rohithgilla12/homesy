@@ -15,3 +15,5 @@ dist/
 /ios
 /android
 *.ipa
+*.aab
+*.apk

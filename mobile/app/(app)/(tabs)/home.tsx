@@ -8,7 +8,7 @@ import { useCelebrate } from '@/store/celebrate';
 import { useActiveHome } from '@/store/home';
 import { useSession } from '@/store/session';
 import {
-  Avatar, Button, Card, Chip, HOME_EMOJI, IconButton, Input, Pill, Screen, Sheet, Text, color, radius, space, status,
+  AttachmentPicker, Avatar, Button, Card, Chip, CoverImage, HOME_EMOJI, IconButton, Input, Pill, Screen, Sheet, Text, color, radius, space, status,
 } from '@/ui';
 
 export default function HomeScreen() {
@@ -30,6 +30,19 @@ export default function HomeScreen() {
 
   const { data: homes = [] } = useQuery({ queryKey: ['homes'], queryFn: api.homes });
   const { data: detail } = useQuery({ queryKey: ['home', activeHomeId], queryFn: () => api.home(activeHomeId!), enabled: !!activeHomeId });
+  const { data: me } = useQuery({ queryKey: ['me'], queryFn: api.me });
+  const isOwner = !!detail?.members.some((m) => m.user_id === user?.id && m.role === 'owner');
+  const refreshMe = () => { qc.invalidateQueries({ queryKey: ['me'] }); qc.invalidateQueries({ queryKey: ['home', activeHomeId] }); };
+  const setAvatar = useMutation({
+    mutationFn: (avatar_id: string | null) => api.updateMe({ avatar_id }),
+    onSuccess: refreshMe,
+    onError: (e) => Alert.alert('Could not update photo', friendlyError(e, 'generic')),
+  });
+  const setCover = useMutation({
+    mutationFn: (cover_id: string | null) => api.updateHome(activeHomeId!, { cover_id }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['home', activeHomeId] }); qc.invalidateQueries({ queryKey: ['homes'] }); },
+    onError: (e) => Alert.alert('Could not update cover photo', friendlyError(e, 'generic')),
+  });
   const { data: notices = [] } = useQuery({ queryKey: ['bulletin', activeHomeId], queryFn: () => api.bulletin(activeHomeId!), enabled: !!activeHomeId });
 
   // Celebrate when someone joins a home you own (member count grows via the live SSE invalidation).
@@ -115,8 +128,19 @@ export default function HomeScreen() {
   const accountCard = (
     <Card style={{ gap: space(1) }}>
       <Text variant="title">Account</Text>
-      <Text variant="headline" style={{ marginTop: space(2) }}>{user?.display_name}</Text>
-      <Text tone="muted">{user?.email}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space(3), marginTop: space(2) }}>
+        {user ? <Avatar userId={user.id} name={user.display_name} size={56} uri={me?.avatar?.url} /> : null}
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text variant="headline">{user?.display_name}</Text>
+          <Text tone="muted">{user?.email}</Text>
+        </View>
+      </View>
+      {activeHomeId ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space(2), flexWrap: 'wrap' }}>
+          <AttachmentPicker homeId={activeHomeId} kind="avatar" label={me?.avatar ? 'Change photo' : 'Add photo'} onUploaded={(a) => setAvatar.mutate(a.id)} />
+          {me?.avatar ? <Button title="Remove photo" variant="ghost" size="sm" onPress={() => setAvatar.mutate(null)} /> : null}
+        </View>
+      ) : null}
       <Button
         title="Sign out"
         icon="signOut"
@@ -148,7 +172,16 @@ export default function HomeScreen() {
   return (
     <>
       <Screen scroll>
-        <Text variant="display">{detail ? detail.name : ' '}</Text>
+        {detail?.cover ? <CoverImage uri={detail.cover.url} onExpired={() => qc.invalidateQueries({ queryKey: ['home', activeHomeId] })} /> : null}
+        <View style={s.rowBetween}>
+          <Text variant="display" style={{ flex: 1 }}>{detail ? detail.name : ' '}</Text>
+        </View>
+        {detail && isOwner ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space(2), flexWrap: 'wrap' }}>
+            <AttachmentPicker homeId={detail.id} kind="home_cover" label={detail.cover ? 'Change cover photo' : 'Add cover photo'} onUploaded={(a) => setCover.mutate(a.id)} />
+            {detail.cover ? <Button title="Remove cover" variant="ghost" size="sm" onPress={() => setCover.mutate(null)} /> : null}
+          </View>
+        ) : null}
 
         <Card style={{ gap: space(3), backgroundColor: color.surface }}>
           <View style={s.rowBetween}>
@@ -209,7 +242,7 @@ export default function HomeScreen() {
             <Text variant="caption" tone="muted" style={{ marginTop: space(3), marginBottom: space(1) }}>Members · {detail.members.length}</Text>
             {detail.members.map((m, i) => (
               <View key={m.user_id} style={[s.member, i === detail.members.length - 1 && { borderBottomWidth: 0 }]}>
-                <Avatar userId={m.user_id} name={m.display_name} />
+                <Avatar userId={m.user_id} name={m.display_name} uri={m.avatar?.url} />
                 <View style={{ flex: 1 }}>
                   <Text variant="headline">
                     {m.display_name}

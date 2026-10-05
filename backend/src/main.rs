@@ -17,7 +17,12 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
 
-    let state = state::AppState::new(pool, cfg.jwt_secret.clone());
+    let storage = homesy_api::storage::Storage::from_env();
+    if storage.is_none() {
+        tracing::warn!("R2 variables not set: attachments disabled");
+    }
+    let state = state::AppState::new(pool, cfg.jwt_secret.clone()).with_storage(storage);
+    homesy_api::sweep::spawn(state.clone());
     let app = create_app(state, cfg.cors_origins.as_deref());
 
     let addr = format!("0.0.0.0:{}", cfg.port);

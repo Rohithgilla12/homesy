@@ -14,13 +14,14 @@ Two independent projects, no shared tooling or workspace at the root:
 ## Commands
 
 ```bash
-# Postgres 16 on :5432 (user/password/db all "homesy")
+# Postgres 16 on :5432 (user/password/db all "homesy") and an S3 stand-in (RustFS) on :9000 for the attachment tests
 docker compose up -d
 
 # Backend (from backend/)
 cp .env.example .env       # DATABASE_URL, JWT_SECRET, PORT, RUST_LOG
 cargo run                  # applies migrations on boot, listens on :8080
 cargo test                 # unit + integration; integration needs the DB up
+S3_ENDPOINT=http://localhost:9000 cargo test   # also runs the attachment tests against the local S3 stand-in
 cargo test --lib                                          # unit tests only, no DB
 cargo test --lib auth::tests::test_jwt_issuance_and_verification
 cargo test --test api_integration_test test_sse_events_broadcast
@@ -47,6 +48,7 @@ Integration tests (`backend/tests/api_integration_test.rs`) connect to `DATABASE
 - New homes get three default lists (Groceries, Laundry, To-do) inside the create transaction. The last owner cannot leave a home.
 - **Bills:** `billing_period` is required on create and new-cycle. `due_date` is a SQL `date`, so it must be `YYYY-MM-DD` or the JSON extractor rejects the whole body with a plain-text 422. `POST /bills/{id}/pay` takes an optional `paid_by`, which defaults to the caller and must be a home member. `new-cycle` resets a bill to unpaid for the next period. The PATCH handlers merge with `Option::or(existing)`, so a null or empty field keeps the old value and cannot clear it.
 - The vault's `is_secret` only controls masking in the UI. Values are stored in plaintext.
+- **Attachments:** `storage.rs` wraps an S3 client pointed at Cloudflare R2; `attachments.rs` holds validation and the `AttachmentOut` DTO. Clients never send bytes through the API: `POST /homes/{id}/attachments` returns a presigned PUT, the phone uploads, then `POST /attachments/{id}/complete` verifies with `HEAD`. Owners (`household_bills.receipt_id`, `vault_entry_attachments`, `users.avatar_id`, `homes.cover_id`) embed `AttachmentOut` with a 10-minute presigned GET in their responses. The four `R2_*` variables are optional; unset means `GET /config` reports `attachments: false` and the endpoints answer 503. Tests use `S3_ENDPOINT` (RustFS locally and in CI).
 - **CORS** is permissive unless `CORS_ORIGINS` is set (comma-separated `scheme://host[:port]`, validated at startup). Production sets it to the web app origin.
 - **Deployment:** merging backend changes to `main` tests, builds an arm64 image, and deploys it to `https://homesy-api.gilla.fun` (see `DEPLOY.md`). The API runs as a single instance, which the in-process SSE broadcast requires. `/health` pings the database and returns 503 within about 2 s when it is down.
 
@@ -55,6 +57,7 @@ Integration tests (`backend/tests/api_integration_test.rs`) connect to `DATABASE
 - **Routing (`mobile/app/`):** the root `_layout.tsx` hydrates the session and active-home stores from SecureStore and redirects between `(auth)` and `(app)` based on the token. `(app)/_layout.tsx` fetches `['homes']`, renders the Home tab as onboarding when the user has no homes, and mounts `useHomeEvents(activeHomeId)`. The tabs are `index` (lists), `bills`, `vault`, `activity`, and `home`.
 - **API:** `src/api/client.ts` is the single typed `api` object. It reads the token from the Zustand session store, any 401 triggers `signOut()`, and plain-text error bodies (Axum rejections) are surfaced as the error message. Response types live in `src/api/types.ts`, mirrored by hand from `backend/src/models.rs` (see below). The import alias is `@/*` → `src/*`.
 - **State:** server state lives in TanStack Query, persisted to AsyncStorage (`HOMESY_QUERY_CACHE`, 24h). Query keys are scoped by home: `['lists', homeId]`, `['items', listId]`, `['vault', homeId]`, `['bills', homeId]`, `['bulletin', homeId]`, `['activity', homeId]`, `['home', homeId]`, `['homes']`. Client state is in Zustand: `store/session.ts` holds the token and user, `store/home.ts` holds the active home id, and both are persisted in SecureStore.
+- **Attachments:** `AttachmentPicker` and `AttachmentThumb` (`@/ui`) are the only way to upload or show files; `src/api/attachments.ts` resizes images to 2048 px, converts HEIC to JPEG and does create → PUT → complete. The `features` store reads `GET /config` once per session and the picker renders nothing while `attachments` is false, so local dev needs no bucket.
 - **Realtime sync (`src/api/events.ts`):** React Native has no `EventSource`, so SSE is read through `XMLHttpRequest` progress events with manual line parsing and exponential-backoff reconnects. Events are never applied to the cache directly. The hook only invalidates query keys by substring-matching the event name (`bill`, `vault`, `item`, …). A new backend event type needs a matching name or a branch here, or screens will not refresh.
 
 ## Design system (mobile)

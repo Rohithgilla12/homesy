@@ -9,6 +9,9 @@ pub struct User {
     pub email: String,
     pub display_name: String,
     pub created_at: DateTime<Utc>,
+    pub avatar_id: Option<Uuid>,
+    #[sqlx(skip)]
+    pub avatar: Option<AttachmentOut>,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -19,6 +22,9 @@ pub struct Home {
     pub invite_code: String,
     pub created_by: Uuid,
     pub created_at: DateTime<Utc>,
+    pub cover_id: Option<Uuid>,
+    #[sqlx(skip)]
+    pub cover: Option<AttachmentOut>,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -28,6 +34,9 @@ pub struct Member {
     pub email: String,
     pub role: String,
     pub joined_at: DateTime<Utc>,
+    pub avatar_id: Option<Uuid>,
+    #[sqlx(skip)]
+    pub avatar: Option<AttachmentOut>,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -66,6 +75,8 @@ pub struct VaultEntry {
     pub pinned: bool,
     pub created_by: Uuid,
     pub updated_at: DateTime<Utc>,
+    #[sqlx(skip)]
+    pub attachments: Vec<AttachmentOut>,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -112,6 +123,9 @@ pub struct HouseholdBill {
     pub paid_by_name: Option<String>,
     #[sqlx(default)]
     pub created_by_name: Option<String>,
+    pub receipt_id: Option<Uuid>,
+    #[sqlx(skip)]
+    pub receipt: Option<AttachmentOut>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -123,6 +137,7 @@ pub struct CreateBill {
     pub due_date: Option<NaiveDate>,
     pub billing_period: String,
     pub notes: Option<String>,
+    pub receipt_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -142,6 +157,9 @@ pub struct UpdateBill {
     pub due_date: Option<NaiveDate>,
     pub billing_period: Option<String>,
     pub notes: Option<String>,
+    /// Absent keeps the receipt, `null` clears it, an id replaces it.
+    #[serde(default, deserialize_with = "crate::attachments::double_option")]
+    pub receipt_id: Option<Option<Uuid>>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -156,4 +174,27 @@ pub struct HomeEvent {
     pub home_id: Uuid,
     pub event_type: String,
     pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct Attachment {
+    pub id: Uuid,
+    pub home_id: Uuid,
+    pub uploaded_by: Uuid,
+    pub kind: String,
+    pub content_type: String,
+    pub size_bytes: i64,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// What clients see: the row plus a short-lived presigned GET.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttachmentOut {
+    pub id: Uuid,
+    pub kind: String,
+    pub content_type: String,
+    pub size_bytes: i64,
+    pub url: String,
+    pub url_expires_at: DateTime<Utc>,
 }

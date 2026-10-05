@@ -4,13 +4,13 @@ import { useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { api } from '@/api/client';
-import { BILL_CATEGORY_CONFIG, type BillCategory, type HouseholdBill } from '@/api/types';
+import { BILL_CATEGORY_CONFIG, type Attachment, type BillCategory, type HouseholdBill } from '@/api/types';
 import { friendlyError } from '@/lib/errors';
 import { formatRupees, relativeDue, shortDate } from '@/lib/format';
 import { useActiveHome } from '@/store/home';
 import { useSession } from '@/store/session';
 import {
-  Button, Card, Chip, CountUp, DateField, EmptyState, Icon, IconButton, Input, PaidStamp, Pill, Pressable, Screen, Sheet, Text,
+  AttachmentPicker, AttachmentThumb, Button, Card, Chip, CountUp, DateField, EmptyState, Icon, IconButton, Input, PaidStamp, Pill, Pressable, Screen, Sheet, Text,
   category, color, radius, space, status, useRoofRefresh,
   useManualRefresh,
 } from '@/ui';
@@ -37,6 +37,7 @@ export default function BillsScreen() {
   const [aPeriod, setAPeriod] = useState(monthLabel(new Date()));
   const [aNotes, setANotes] = useState('');
   const [aError, setAError] = useState<string | null>(null);
+  const [aReceipt, setAReceipt] = useState<Attachment | null>(null);
 
   const [payBill, setPayBill] = useState<HouseholdBill | null>(null);
   const [payer, setPayer] = useState<string | null>(null);
@@ -63,12 +64,18 @@ export default function BillsScreen() {
     mutationFn: () => api.createBill(homeId!, {
       title: aTitle.trim(), category: aCat, amount_cents: parseAmount(aAmount) ?? undefined,
       account_number: aAccount.trim() || undefined, due_date: aDue ?? undefined, billing_period: aPeriod.trim(), notes: aNotes.trim() || undefined,
+      receipt_id: aReceipt?.id,
     }),
     onSuccess: () => {
-      setAddOpen(false); setATitle(''); setAAmount(''); setADue(null); setAAccount(''); setANotes(''); setAError(null);
+      setAddOpen(false); setATitle(''); setAAmount(''); setADue(null); setAAccount(''); setANotes(''); setAError(null); setAReceipt(null);
       invalidate();
     },
     onError: (e) => setAError(friendlyError(e, 'generic')),
+  });
+  const setReceipt = useMutation({
+    mutationFn: ({ id, receipt_id }: { id: string; receipt_id: string | null }) => api.updateBill(id, { receipt_id }),
+    onSuccess: invalidate,
+    onError: (e) => Alert.alert('Could not update receipt', friendlyError(e, 'generic')),
   });
   const pay = useMutation({
     mutationFn: (b: HouseholdBill) => api.payBill(b.id, { paid_by: payer ?? undefined, payment_ref: payRef.trim() || undefined }),
@@ -208,6 +215,7 @@ export default function BillsScreen() {
               ) : null}
 
               {b.notes ? <Text variant="label" tone="muted">{b.notes}</Text> : null}
+              {b.receipt ? <AttachmentThumb attachment={b.receipt} size={56} onExpired={invalidate} /> : null}
 
               {b.is_paid ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: space(2) }}>
@@ -240,6 +248,11 @@ export default function BillsScreen() {
         <Input label="Billing period" placeholder="e.g. October 2026" value={aPeriod} onChangeText={setAPeriod} />
         <View style={{ gap: space(3) }}>
           <Input label="Notes" placeholder="e.g. Auto-pay off, pay before 5 PM" value={aNotes} onChangeText={setANotes} error={aError} />
+          {aReceipt ? (
+            <AttachmentThumb attachment={aReceipt} onRemove={() => { api.deleteAttachment(aReceipt.id).catch(() => {}); setAReceipt(null); }} />
+          ) : (
+            <AttachmentPicker homeId={homeId!} kind="bill_receipt" allowPdf label="Add receipt" onUploaded={setAReceipt} />
+          )}
           <Button title="Add bill" fullWidth loading={create.isPending} onPress={submitAdd} />
         </View>
       </Sheet>
@@ -279,6 +292,18 @@ export default function BillsScreen() {
             }}
           />
         ) : null}
+        {moreBill ? (
+          <AttachmentPicker
+            homeId={homeId!}
+            kind="bill_receipt"
+            allowPdf
+            label={moreBill.receipt ? 'Replace receipt' : 'Add receipt'}
+            onUploaded={(a) => { const b = moreBill; setMoreBill(null); setReceipt.mutate({ id: b.id, receipt_id: a.id }); }}
+          />
+        ) : null}
+        {moreBill?.receipt ? (
+          <MoreRow icon="photo" label="Remove receipt" onPress={() => { const b = moreBill; setMoreBill(null); setReceipt.mutate({ id: b.id, receipt_id: null }); }} />
+        ) : null}
         <MoreRow
           icon="delete"
           label="Delete bill"
@@ -312,7 +337,7 @@ export default function BillsScreen() {
   );
 }
 
-function MoreRow({ icon, label, onPress, danger = false }: { icon: 'nextCycle' | 'undo' | 'delete'; label: string; onPress: () => void; danger?: boolean }) {
+function MoreRow({ icon, label, onPress, danger = false }: { icon: 'nextCycle' | 'undo' | 'delete' | 'photo'; label: string; onPress: () => void; danger?: boolean }) {
   const fg = danger ? status.danger : color.ink;
   return (
     <Pressable onPress={onPress} style={s.moreRow}>

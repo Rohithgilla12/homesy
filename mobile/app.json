@@ -39,6 +39,13 @@
             "enableSceneSupport": true
           }
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Homesy uses your photos for receipts, documents and notes.",
+          "cameraPermission": "Homesy uses the camera for receipts, documents and notes."
+        }
       ]
     ],
     "experiments": {

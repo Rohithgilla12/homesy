@@ -1,8 +1,19 @@
-export type User = { id: string; email: string; display_name: string; created_at: string };
+export type AttachmentKind = 'note_photo' | 'bill_receipt' | 'vault_document' | 'avatar' | 'home_cover';
+export type Attachment = {
+  id: string; kind: AttachmentKind; content_type: string; size_bytes: number; url: string; url_expires_at: string;
+};
+
+export type User = {
+  id: string; email: string; display_name: string; created_at: string; avatar_id: string | null; avatar: Attachment | null;
+};
 export type Home = {
   id: string; name: string; emoji: string; invite_code: string; created_by: string; created_at: string;
+  cover_id: string | null; cover: Attachment | null;
 };
-export type Member = { user_id: string; display_name: string; email: string; role: 'owner' | 'member'; joined_at: string };
+export type Member = {
+  user_id: string; display_name: string; email: string; role: 'owner' | 'member'; joined_at: string;
+  avatar_id: string | null; avatar: Attachment | null;
+};
 export type HomeDetail = Home & { members: Member[] };
 
 export type ListKind = 'grocery' | 'laundry' | 'todo' | 'custom';
@@ -15,7 +26,7 @@ export type ListItem = {
 export type VaultCategory = 'utilities' | 'contacts' | 'access' | 'documents' | 'other';
 export type VaultEntry = {
   id: string; home_id: string; category: VaultCategory; label: string; value: string;
-  is_secret: boolean; pinned: boolean; created_by: string; updated_at: string;
+  is_secret: boolean; pinned: boolean; created_by: string; updated_at: string; attachments: Attachment[];
 };
 
 export type NoticePriority = 'normal' | 'urgent';
@@ -72,6 +83,8 @@ export type HouseholdBill = {
   updated_at: string;
   paid_by_name: string | null;
   created_by_name: string | null;
+  receipt_id: string | null;
+  receipt: Attachment | null;
 };
 
 export const BILL_CATEGORY_CONFIG: Record<

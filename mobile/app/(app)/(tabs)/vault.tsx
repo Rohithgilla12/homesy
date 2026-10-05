@@ -4,11 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { api } from '@/api/client';
-import { VAULT_CATEGORY_LABEL, type VaultCategory, type VaultEntry } from '@/api/types';
+import { VAULT_CATEGORY_LABEL, type Attachment, type VaultCategory, type VaultEntry } from '@/api/types';
 import { friendlyError } from '@/lib/errors';
 import { useActiveHome } from '@/store/home';
 import {
-  BlurReveal, Button, Card, Chip, EmptyState, Icon, IconButton, Input, Pill, Pressable, Screen, Sheet, Text,
+  AttachmentPicker, AttachmentThumb, BlurReveal, Button, Card, Chip, EmptyState, Icon, IconButton, Input, Pill, Pressable, Screen, Sheet, Text,
   category, color, radius, space, status,
   useManualRefresh,
 } from '@/ui';
@@ -26,7 +26,7 @@ const isWifiEntry = (e: VaultEntry) => {
 
 type EntryActions = {
   reveal: (id: string) => void; copy: (e: VaultEntry) => void; edit: (e: VaultEntry) => void;
-  pin: (e: VaultEntry) => void; wifi: (e: VaultEntry) => void; remove: (e: VaultEntry) => void;
+  pin: (e: VaultEntry) => void; wifi: (e: VaultEntry) => void; remove: (e: VaultEntry) => void; refresh: () => void;
 };
 
 /** One vault entry. Module-level so a screen re-render (typing in a sheet, a reveal) updates rows instead of remounting them. */
@@ -61,6 +61,11 @@ function EntryRow({ e, last, revealed, copied, actions }: { e: VaultEntry; last:
         ) : (
           <Text selectable>{e.value}</Text>
         )}
+        {e.attachments.length ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space(2), marginTop: space(1) }}>
+            {e.attachments.map((a) => <AttachmentThumb key={a.id} attachment={a} size={56} onExpired={actions.refresh} />)}
+          </ScrollView>
+        ) : null}
         {w ? (
           <View style={{ flexDirection: 'row', gap: space(2), marginTop: space(1) }}>
             <Button title="QR code" icon="qr" size="sm" variant="secondary" onPress={() => actions.wifi(e)} />
@@ -101,6 +106,7 @@ export default function VaultScreen() {
   const [aValue, setAValue] = useState('');
   const [aSecret, setASecret] = useState(false);
   const [aPinned, setAPinned] = useState(false);
+  const [aDocs, setADocs] = useState<Attachment[]>([]);
 
   const [editing, setEditing] = useState<VaultEntry | null>(null);
   const [eCat, setECat] = useState<VaultCategory>('other');
@@ -108,15 +114,16 @@ export default function VaultScreen() {
   const [eValue, setEValue] = useState('');
   const [eSecret, setESecret] = useState(false);
   const [ePinned, setEPinned] = useState(false);
+  const [eDocs, setEDocs] = useState<Attachment[]>([]);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: key });
   const create = useMutation({
-    mutationFn: () => api.createVault(homeId!, { category: aCat, label: aLabel.trim(), value: aValue.trim(), is_secret: aSecret, pinned: aPinned }),
-    onSuccess: () => { setAddOpen(false); setALabel(''); setAValue(''); setASecret(false); setAPinned(false); invalidate(); },
+    mutationFn: () => api.createVault(homeId!, { category: aCat, label: aLabel.trim(), value: aValue.trim(), is_secret: aSecret, pinned: aPinned, attachment_ids: aDocs.map((d) => d.id) }),
+    onSuccess: () => { setAddOpen(false); setALabel(''); setAValue(''); setASecret(false); setAPinned(false); setADocs([]); invalidate(); },
     onError: (e) => Alert.alert('Could not save detail', friendlyError(e, 'generic')),
   });
   const update = useMutation({
-    mutationFn: () => api.updateVault(editing!.id, { category: eCat, label: eLabel.trim(), value: eValue.trim(), is_secret: eSecret, pinned: ePinned }),
+    mutationFn: () => api.updateVault(editing!.id, { category: eCat, label: eLabel.trim(), value: eValue.trim(), is_secret: eSecret, pinned: ePinned, attachment_ids: eDocs.map((d) => d.id) }),
     onSuccess: () => { setEditing(null); invalidate(); },
     onError: (e) => Alert.alert('Could not update detail', friendlyError(e, 'generic')),
   });
@@ -142,7 +149,7 @@ export default function VaultScreen() {
     setCopied(e.id);
     setTimeout(() => setCopied(null), 2000);
   };
-  const openEdit = (e: VaultEntry) => { setEditing(e); setECat(e.category); setELabel(e.label); setEValue(e.value); setESecret(e.is_secret); setEPinned(e.pinned); };
+  const openEdit = (e: VaultEntry) => { setEditing(e); setECat(e.category); setELabel(e.label); setEValue(e.value); setESecret(e.is_secret); setEPinned(e.pinned); setEDocs(e.attachments); };
   const openWifi = (e: VaultEntry) => {
     setWifi(e); setWifiCopied(false);
     const cleaned = e.label.replace(/wi-?fi/gi, '').replace(/password/gi, '').replace(/credentials/gi, '').replace(/code/gi, '').replace(/pass/gi, '').trim();
@@ -163,7 +170,20 @@ export default function VaultScreen() {
   const pinned = filtered.filter((e) => e.pinned);
   const groups = CATEGORIES.map((c) => ({ c, items: filtered.filter((e) => !e.pinned && e.category === c) })).filter((g) => g.items.length);
 
-  const rowActions: EntryActions = { reveal, copy, edit: openEdit, pin: (e) => togglePin.mutate(e), wifi: openWifi, remove: confirmDelete };
+  const rowActions: EntryActions = { reveal, copy, edit: openEdit, pin: (e) => togglePin.mutate(e), wifi: openWifi, remove: confirmDelete, refresh: invalidate };
+  // Documents attached in a sheet: removing an unsaved upload deletes it now; saved ones go when the entry is saved.
+  const docsRow = (docs: Attachment[], set: (d: Attachment[]) => void, unsaved: boolean) => (
+    <View style={{ gap: space(2) }}>
+      {docs.length ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space(2) }}>
+          {docs.map((d) => (
+            <AttachmentThumb key={d.id} attachment={d} size={56} onRemove={() => { if (unsaved) api.deleteAttachment(d.id).catch(() => {}); set(docs.filter((x) => x.id !== d.id)); }} />
+          ))}
+        </ScrollView>
+      ) : null}
+      <AttachmentPicker homeId={homeId!} kind="vault_document" allowPdf label="Add document" onUploaded={(a) => set([...docs, a])} />
+    </View>
+  );
   const section = (title: string, items: VaultEntry[]) => (
     <View key={title} style={{ gap: space(2) }}>
       <Text variant="caption" tone="muted" style={{ marginLeft: space(1) }}>{title}</Text>
@@ -215,6 +235,7 @@ export default function VaultScreen() {
         {categoryChips(aCat, setACat)}
         <Input label="Label" placeholder="e.g. Wi-Fi password, Maid contact, Spare key" value={aLabel} onChangeText={setALabel} />
         <Input label="Value" placeholder="e.g. +91 98765 43210" value={aValue} onChangeText={setAValue} multiline={!aSecret} secureTextEntry={aSecret} />
+        {docsRow(aDocs, setADocs, true)}
         {switchRow('Hidden', 'Masked until someone taps Show', aSecret, setASecret)}
         <View style={{ gap: space(3) }}>
           {switchRow('Pin to top', 'Always shown in Pinned', aPinned, setAPinned)}
@@ -226,6 +247,7 @@ export default function VaultScreen() {
         {categoryChips(eCat, setECat)}
         <Input label="Label" value={eLabel} onChangeText={setELabel} />
         <Input label="Value" value={eValue} onChangeText={setEValue} secureTextEntry={eSecret} />
+        {docsRow(eDocs, setEDocs, false)}
         {switchRow('Hidden', null, eSecret, setESecret)}
         <View style={{ gap: space(3) }}>
           {switchRow('Pin to top', null, ePinned, setEPinned)}

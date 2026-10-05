@@ -2,7 +2,7 @@
 name = "homesy-api"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.94"
 
 [dependencies]
 axum = "0.8"
@@ -23,9 +23,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
 tokio-stream = { version = "0.1", features = ["sync"] }
 futures = "0.3"
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1"
+aws-credential-types = "1"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 

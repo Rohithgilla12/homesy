@@ -20,3 +20,7 @@ export { TabBar } from './TabBar';
 export { HomeSwitcherSheet, HOME_EMOJI } from './HomeSwitcherSheet';
 export { AuthShell } from './AuthShell';
 export { useManualRefresh } from './useManualRefresh';
+export { AttachmentThumb } from './AttachmentThumb';
+export { AttachmentPicker } from './AttachmentPicker';
+export { AttachmentViewer } from './AttachmentViewer';
+export { CoverImage } from './CoverImage';

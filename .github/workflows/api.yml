@@ -51,9 +51,15 @@ jobs:
           workspaces: backend
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
+      # RustFS stands in for R2 in the attachment tests (same S3 API). A step, not a service, so it can take args.
+      - run: |
+          docker run -d --name s3 -p 9000:9000 -e RUSTFS_ACCESS_KEY=homesy -e RUSTFS_SECRET_KEY=homesyhomesy rustfs/rustfs:latest
+          for _ in $(seq 1 30); do curl -sf http://localhost:9000/health && break; sleep 1; done
+          docker run --rm --network host -e AWS_ACCESS_KEY_ID=homesy -e AWS_SECRET_ACCESS_KEY=homesyhomesy -e AWS_DEFAULT_REGION=us-east-1 amazon/aws-cli:latest --endpoint-url http://localhost:9000 s3 mb s3://homesy-test
       - run: cargo test
         env:
           DATABASE_URL: postgres://homesy:homesy@localhost:5432/homesy
+          S3_ENDPOINT: http://localhost:9000
 
   build-push:
     needs: test

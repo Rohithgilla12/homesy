@@ -7,5 +7,22 @@ services:
       POSTGRES_DB: homesy
     ports: ["5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
+  # S3 stand-in for the attachment tests (RustFS speaks the same API as R2). Creds are test-only.
+  s3:
+    image: rustfs/rustfs:latest
+    environment:
+      RUSTFS_ACCESS_KEY: homesy
+      RUSTFS_SECRET_KEY: homesyhomesy
+    ports: ["9000:9000"]
+    volumes: ["s3data:/data"]
+  s3-init:
+    image: amazon/aws-cli:latest
+    depends_on: [s3]
+    environment:
+      AWS_ACCESS_KEY_ID: homesy
+      AWS_SECRET_ACCESS_KEY: homesyhomesy
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ["/bin/sh", "-c", "sleep 3 && aws --endpoint-url http://s3:9000 s3 mb s3://homesy-test || true"]
 volumes:
   pgdata:
+  s3data:

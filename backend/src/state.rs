@@ -1,4 +1,5 @@
 use crate::models::HomeEvent;
+use crate::storage::Storage;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -8,6 +9,7 @@ pub struct AppState {
     pub pool: PgPool,
     pub jwt_secret: Arc<String>,
     pub events_tx: broadcast::Sender<HomeEvent>,
+    pub storage: Option<Arc<Storage>>,
 }
 
 impl AppState {
@@ -17,7 +19,13 @@ impl AppState {
             pool,
             jwt_secret: Arc::new(jwt_secret),
             events_tx,
+            storage: None,
         }
+    }
+
+    pub fn with_storage(mut self, storage: Option<Storage>) -> Self {
+        self.storage = storage.map(Arc::new);
+        self
     }
 
     pub fn broadcast(&self, event: HomeEvent) {

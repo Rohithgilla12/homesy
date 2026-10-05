@@ -16,7 +16,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/auth/signup", post(signup))
         .route("/auth/login", post(login))
-        .route("/me", get(me))
+        .route("/me", get(me).patch(update_me))
 }
 
 #[derive(Deserialize)]
@@ -38,7 +38,7 @@ struct AuthResponse {
     user: User,
 }
 
-const USER_COLS: &str = "id, email, display_name, created_at";
+const USER_COLS: &str = "id, email, display_name, created_at, avatar_id";
 
 async fn signup(
     State(s): State<AppState>,
@@ -110,5 +110,71 @@ async fn me(State(s): State<AppState>, AuthUser(uid): AuthUser) -> AppResult<Jso
         .bind(uid)
         .fetch_one(&s.pool)
         .await?;
-    Ok(Json(user))
+    Ok(Json(decorate_user(&s, user).await?))
+}
+
+/// Embeds the presigned avatar URL; a no-op when storage is off.
+pub async fn decorate_user(s: &AppState, mut user: User) -> AppResult<User> {
+    if let Some(id) = user.avatar_id {
+        let outs = crate::attachments::outs_for(&s.pool, s.storage.as_deref(), &[id]).await?;
+        user.avatar = outs.get(&id).cloned();
+    }
+    Ok(user)
+}
+
+#[derive(Deserialize)]
+struct UpdateMe {
+    display_name: Option<String>,
+    /// Absent keeps the avatar, `null` clears it, an id replaces it.
+    #[serde(default, deserialize_with = "crate::attachments::double_option")]
+    avatar_id: Option<Option<Uuid>>,
+}
+
+async fn update_me(
+    State(s): State<AppState>,
+    AuthUser(uid): AuthUser,
+    Json(b): Json<UpdateMe>,
+) -> AppResult<Json<User>> {
+    let current: User = sqlx::query_as(&format!("select {USER_COLS} from users where id = $1"))
+        .bind(uid)
+        .fetch_one(&s.pool)
+        .await?;
+    let name = match b.display_name {
+        Some(n) if !n.trim().is_empty() => n.trim().to_string(),
+        _ => current.display_name.clone(),
+    };
+    let avatar_id = match b.avatar_id {
+        Some(Some(id)) => {
+            let a = crate::attachments::load_ready(&s.pool, id).await?;
+            if a.uploaded_by != uid || a.kind != "avatar" {
+                return Err(AppError::BadRequest("not your avatar".into()));
+            }
+            Some(id)
+        }
+        Some(None) => None,
+        None => current.avatar_id,
+    };
+    let user: User = sqlx::query_as(&format!(
+        "update users set display_name = $1, avatar_id = $2 where id = $3 returning {USER_COLS}"
+    ))
+    .bind(&name)
+    .bind(avatar_id)
+    .bind(uid)
+    .fetch_one(&s.pool)
+    .await?;
+    if let Some(old) = current.avatar_id.filter(|old| Some(*old) != avatar_id) {
+        crate::routes::attachments::delete_many(&s, &[old]).await?;
+    }
+    let homes: Vec<(Uuid,)> = sqlx::query_as("select home_id from home_members where user_id = $1")
+        .bind(uid)
+        .fetch_all(&s.pool)
+        .await?;
+    for (home_id,) in homes {
+        s.broadcast(crate::models::HomeEvent {
+            home_id,
+            event_type: "member_updated".into(),
+            payload: serde_json::json!({ "user_id": uid }),
+        });
+    }
+    Ok(Json(decorate_user(&s, user).await?))
 }

@@ -12,6 +12,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { useFeatures } from '@/store/features';
 import { useActiveHome } from '@/store/home';
 import { useSession } from '@/store/session';
 import { ColdStart } from '@/ui/motion';
@@ -52,7 +53,7 @@ export default function Root() {
   const ready = hydrated && (fontsLoaded || !!fontError);
   const [showColdStart, setShowColdStart] = useState(!coldStartPlayed);
 
-  useEffect(() => { hydrate(); hydrateHome(); }, []);
+  useEffect(() => { hydrate(); hydrateHome(); useFeatures.getState().load(); }, []);
   useEffect(() => { if (fontError) console.warn('font load failed', fontError); }, [fontError]);
   useEffect(() => { if (ready) SplashScreen.hideAsync().catch(() => {}); }, [ready]);
 

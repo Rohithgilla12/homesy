@@ -1211,3 +1211,677 @@ async fn test_health_reports_unreachable_database_promptly() {
     let body = parse_json_response(res.into_body()).await;
     assert_eq!(body["error"], "database unavailable");
 }
+
+fn storage_for_tests() -> Option<homesy_api::storage::Storage> {
+    // CI runs MinIO; locally `docker compose up -d` starts it too. Without it these tests return early.
+    let endpoint = std::env::var("S3_ENDPOINT").ok()?;
+    Some(homesy_api::storage::Storage::new(
+        endpoint,
+        "homesy".into(),
+        "homesyhomesy".into(),
+        "homesy-test".into(),
+    ))
+}
+
+async fn signup_and_home(app: &axum::Router) -> (String, String) {
+    let email = format!("att_{}@example.com", Uuid::now_v7());
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/signup")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"email": email, "password": "password123", "display_name": "Att"})
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let token = parse_json_response(res.into_body()).await["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/homes")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"name": "Att Home"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let home = parse_json_response(res.into_body()).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    (token, home)
+}
+
+fn json_post(uri: String, token: &str, body: Value) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+fn authed(method: &str, uri: String, token: &str) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap()
+}
+
+#[tokio::test]
+async fn attachments_are_disabled_without_storage() {
+    let (_pool, state) = setup_test_db().await;
+    let app = create_app(state, None);
+    let (token, home) = signup_and_home(&app).await;
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/config")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        parse_json_response(res.into_body()).await["attachments"],
+        json!(false)
+    );
+    let res = app
+        .oneshot(json_post(
+            format!("/homes/{home}/attachments"),
+            &token,
+            json!({"kind":"bill_receipt","content_type":"image/jpeg","size_bytes":10}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn attachment_create_complete_read_delete() {
+    let Some(storage) = storage_for_tests() else {
+        return;
+    };
+    let (_pool, state) = setup_test_db().await;
+    let app = create_app(state.with_storage(Some(storage)), None);
+    let (token, home) = signup_and_home(&app).await;
+
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/attachments"),
+            &token,
+            json!({"kind":"bill_receipt","content_type":"image/png","size_bytes":4}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = parse_json_response(res.into_body()).await;
+    let id = created["id"].as_str().unwrap().to_string();
+    let upload_url = created["upload_url"].as_str().unwrap().to_string();
+
+    let res = app
+        .clone()
+        .oneshot(authed(
+            "POST",
+            format!("/attachments/{id}/complete"),
+            &token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT, "complete before upload");
+
+    let client = reqwest::Client::new();
+    let put = client
+        .put(&upload_url)
+        .header("content-type", "image/png")
+        .body(vec![1u8, 2, 3, 4])
+        .send()
+        .await
+        .unwrap();
+    assert!(put.status().is_success(), "{}", put.status());
+
+    let res = app
+        .clone()
+        .oneshot(authed(
+            "POST",
+            format!("/attachments/{id}/complete"),
+            &token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let out = parse_json_response(res.into_body()).await;
+    assert_eq!(out["size_bytes"], json!(4));
+    let get = client
+        .get(out["url"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(get.bytes().await.unwrap().to_vec(), vec![1u8, 2, 3, 4]);
+
+    let res = app
+        .clone()
+        .oneshot(authed("DELETE", format!("/attachments/{id}"), &token))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let get = client
+        .get(out["url"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(get.status(), 404);
+}
+
+#[tokio::test]
+async fn attachment_rejects_bad_type_and_non_members() {
+    let Some(storage) = storage_for_tests() else {
+        return;
+    };
+    let (_pool, state) = setup_test_db().await;
+    let app = create_app(state.with_storage(Some(storage)), None);
+    let (token, home) = signup_and_home(&app).await;
+    let (other_token, _other_home) = signup_and_home(&app).await;
+    let bad = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/attachments"),
+            &token,
+            json!({"kind":"avatar","content_type":"application/pdf","size_bytes":10}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+    let forbidden = app
+        .oneshot(json_post(
+            format!("/homes/{home}/attachments"),
+            &other_token,
+            json!({"kind":"avatar","content_type":"image/png","size_bytes":10}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+}
+
+/// Creates, uploads 4 bytes and completes an attachment; returns its id.
+async fn upload_ready(app: &axum::Router, token: &str, home: &str, kind: &str) -> String {
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/attachments"),
+            token,
+            json!({"kind": kind, "content_type":"image/png","size_bytes":4}),
+        ))
+        .await
+        .unwrap();
+    let created = parse_json_response(res.into_body()).await;
+    reqwest::Client::new()
+        .put(created["upload_url"].as_str().unwrap())
+        .header("content-type", "image/png")
+        .body(vec![1u8, 2, 3, 4])
+        .send()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap().to_string();
+    app.clone()
+        .oneshot(authed("POST", format!("/attachments/{id}/complete"), token))
+        .await
+        .unwrap();
+    id
+}
+
+#[tokio::test]
+async fn bill_receipt_attaches_and_rejects_foreign_attachment() {
+    let Some(storage) = storage_for_tests() else {
+        return;
+    };
+    let (_pool, state) = setup_test_db().await;
+    let app = create_app(state.with_storage(Some(storage)), None);
+    let (token, home) = signup_and_home(&app).await;
+    let (other_token, other_home) = signup_and_home(&app).await;
+    let mine = upload_ready(&app, &token, &home, "bill_receipt").await;
+    let theirs = upload_ready(&app, &other_token, &other_home, "bill_receipt").await;
+
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/bills"),
+            &token,
+            json!({"title":"Gas","category":"gas","billing_period":"Oct","receipt_id": theirs}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "foreign attachment");
+
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/bills"),
+            &token,
+            json!({"title":"Gas","category":"gas","billing_period":"Oct","receipt_id": mine}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bill = parse_json_response(res.into_body()).await;
+    assert_eq!(bill["receipt"]["id"].as_str().unwrap(), mine);
+    assert!(bill["receipt"]["url"].as_str().unwrap().starts_with("http"));
+}
+
+#[tokio::test]
+async fn vault_entry_documents_replace_and_cascade() {
+    let Some(storage) = storage_for_tests() else {
+        return;
+    };
+    let (pool, state) = setup_test_db().await;
+    let app = create_app(state.with_storage(Some(storage)), None);
+    let (token, home) = signup_and_home(&app).await;
+    let d1 = upload_ready(&app, &token, &home, "vault_document").await;
+    let d2 = upload_ready(&app, &token, &home, "vault_document").await;
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/vault"),
+            &token,
+            json!({"category":"documents","label":"Lease","value":"Flat 4B","attachment_ids":[d1, d2]}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let entry = parse_json_response(res.into_body()).await;
+    assert_eq!(entry["attachments"].as_array().map(|a| a.len()), Some(2));
+    let entry_id = entry["id"].as_str().unwrap().to_string();
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/vault/{entry_id}"))
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"attachment_ids":[d2]}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let entry = parse_json_response(res.into_body()).await;
+    assert_eq!(entry["attachments"][0]["id"].as_str().unwrap(), d2);
+    let (n,): (i64,) = sqlx::query_as("select count(*) from attachments where id = $1")
+        .bind(Uuid::parse_str(&d1).unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 0, "dropped document is deleted");
+
+    app.clone()
+        .oneshot(authed("DELETE", format!("/vault/{entry_id}"), &token))
+        .await
+        .unwrap();
+    let (n,): (i64,) = sqlx::query_as("select count(*) from attachments where id = $1")
+        .bind(Uuid::parse_str(&d2).unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 0, "entry delete removes its documents");
+}
+
+#[tokio::test]
+async fn avatar_and_cover_are_set_through_patch() {
+    let Some(storage) = storage_for_tests() else {
+        return;
+    };
+    let (_pool, state) = setup_test_db().await;
+    let app = create_app(state.with_storage(Some(storage)), None);
+    let (token, home) = signup_and_home(&app).await;
+    let avatar = upload_ready(&app, &token, &home, "avatar").await;
+    let cover = upload_ready(&app, &token, &home, "home_cover").await;
+
+    let patch = |uri: String, body: Value| {
+        Request::builder()
+            .method("PATCH")
+            .uri(uri)
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+
+    let res = app
+        .clone()
+        .oneshot(patch("/me".into(), json!({"avatar_id": avatar})))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        parse_json_response(res.into_body()).await["avatar"]["id"]
+            .as_str()
+            .unwrap(),
+        avatar
+    );
+
+    let res = app
+        .clone()
+        .oneshot(patch(format!("/homes/{home}"), json!({"cover_id": cover})))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .oneshot(authed("GET", format!("/homes/{home}"), &token))
+        .await
+        .unwrap();
+    let detail = parse_json_response(res.into_body()).await;
+    assert_eq!(detail["cover"]["id"].as_str().unwrap(), cover);
+    assert_eq!(
+        detail["members"][0]["avatar"]["id"].as_str().unwrap(),
+        avatar
+    );
+}
+
+#[tokio::test]
+async fn stale_pending_attachments_are_swept() {
+    let Some(storage) = storage_for_tests() else {
+        return;
+    };
+    let (pool, state) = setup_test_db().await;
+    let state = state.with_storage(Some(storage));
+    let app = create_app(state.clone(), None);
+    let (token, home) = signup_and_home(&app).await;
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/attachments"),
+            &token,
+            json!({"kind":"avatar","content_type":"image/png","size_bytes":4}),
+        ))
+        .await
+        .unwrap();
+    let id = Uuid::parse_str(
+        parse_json_response(res.into_body()).await["id"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    sqlx::query("update attachments set created_at = now() - interval '2 days' where id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let n = homesy_api::sweep::delete_stale_pending(&state, chrono::Duration::days(1))
+        .await
+        .unwrap();
+    assert!(n >= 1);
+    let (left,): (i64,) = sqlx::query_as("select count(*) from attachments where id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+}
+
+#[tokio::test]
+async fn vault_documents_validate_before_writing_and_dedupe() {
+    let Some(storage) = storage_for_tests() else {
+        return;
+    };
+    let (_pool, state) = setup_test_db().await;
+    let app = create_app(state.with_storage(Some(storage)), None);
+    let (token, home) = signup_and_home(&app).await;
+    let d1 = upload_ready(&app, &token, &home, "vault_document").await;
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/vault"),
+            &token,
+            json!({"category":"documents","label":"Lease","value":"4B","attachment_ids":[d1, d1]}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "duplicate ids are deduped");
+    let entry = parse_json_response(res.into_body()).await;
+    assert_eq!(entry["attachments"].as_array().map(|a| a.len()), Some(1));
+    let entry_id = entry["id"].as_str().unwrap().to_string();
+
+    // A pending (never completed) id must fail before anything is written.
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/attachments"),
+            &token,
+            json!({"kind":"vault_document","content_type":"image/png","size_bytes":4}),
+        ))
+        .await
+        .unwrap();
+    let pending = parse_json_response(res.into_body()).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/vault/{entry_id}"))
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"label":"Changed","attachment_ids":[pending]}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let res = app
+        .oneshot(authed("GET", format!("/homes/{home}/vault"), &token))
+        .await
+        .unwrap();
+    let rows = parse_json_response(res.into_body()).await;
+    assert_eq!(
+        rows[0]["label"],
+        json!("Lease"),
+        "entry untouched after a rejected PATCH"
+    );
+    assert_eq!(rows[0]["attachments"].as_array().map(|a| a.len()), Some(1));
+}
+
+#[tokio::test]
+async fn unreferenced_ready_attachments_are_swept_but_referenced_ones_stay() {
+    let Some(storage) = storage_for_tests() else {
+        return;
+    };
+    let (pool, state) = setup_test_db().await;
+    let state = state.with_storage(Some(storage));
+    let app = create_app(state.clone(), None);
+    let (token, home) = signup_and_home(&app).await;
+    let orphan = upload_ready(&app, &token, &home, "bill_receipt").await;
+    let kept = upload_ready(&app, &token, &home, "bill_receipt").await;
+    app.clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/bills"),
+            &token,
+            json!({"title":"Gas","category":"gas","billing_period":"Oct","receipt_id": kept}),
+        ))
+        .await
+        .unwrap();
+    sqlx::query("update attachments set created_at = now() - interval '2 days' where id = any($1)")
+        .bind(vec![
+            Uuid::parse_str(&orphan).unwrap(),
+            Uuid::parse_str(&kept).unwrap(),
+        ])
+        .execute(&pool)
+        .await
+        .unwrap();
+    homesy_api::sweep::delete_unreferenced_ready(&state, chrono::Duration::days(1))
+        .await
+        .unwrap();
+    let count = |id: &str| {
+        let id = Uuid::parse_str(id).unwrap();
+        let pool = pool.clone();
+        async move {
+            let (n,): (i64,) = sqlx::query_as("select count(*) from attachments where id = $1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            n
+        }
+    };
+    assert_eq!(count(&orphan).await, 0, "orphan swept");
+    assert_eq!(count(&kept).await, 1, "referenced receipt kept");
+}
+
+#[tokio::test]
+async fn attachment_authorization_paths() {
+    let Some(storage) = storage_for_tests() else {
+        return;
+    };
+    let (pool, state) = setup_test_db().await;
+    let app = create_app(state.with_storage(Some(storage)), None);
+    let (owner, home) = signup_and_home(&app).await;
+    // A second member of the same home.
+    let (member, _) = signup_and_home(&app).await;
+    let (code,): (String,) = sqlx::query_as("select invite_code from homes where id = $1")
+        .bind(Uuid::parse_str(&home).unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    app.clone()
+        .oneshot(json_post(
+            "/homes/join".into(),
+            &member,
+            json!({"code": code}),
+        ))
+        .await
+        .unwrap();
+
+    // complete by a non-uploader member → 403
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/attachments"),
+            &owner,
+            json!({"kind":"bill_receipt","content_type":"image/png","size_bytes":4}),
+        ))
+        .await
+        .unwrap();
+    let slot = parse_json_response(res.into_body()).await;
+    let id = slot["id"].as_str().unwrap().to_string();
+    let res = app
+        .clone()
+        .oneshot(authed(
+            "POST",
+            format!("/attachments/{id}/complete"),
+            &member,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::FORBIDDEN,
+        "complete by non-uploader"
+    );
+
+    // size mismatch on complete → 400, row and object removed
+    reqwest::Client::new()
+        .put(slot["upload_url"].as_str().unwrap())
+        .header("content-type", "image/png")
+        .body(vec![1u8, 2, 3])
+        .send()
+        .await
+        .unwrap();
+    let res = app
+        .clone()
+        .oneshot(authed(
+            "POST",
+            format!("/attachments/{id}/complete"),
+            &owner,
+        ))
+        .await
+        .unwrap();
+    assert!(
+        res.status() == StatusCode::BAD_REQUEST || res.status() == StatusCode::CONFLICT,
+        "size mismatch rejected: {}",
+        res.status()
+    );
+    // The signed Content-Length makes storage reject the short PUT, so the row never becomes ready.
+    let (ready,): (i64,) =
+        sqlx::query_as("select count(*) from attachments where id = $1 and status = 'ready'")
+            .bind(Uuid::parse_str(&id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(ready, 0, "mismatched upload never becomes ready");
+
+    // delete by a plain member who is not the uploader → 403
+    let owners_file = upload_ready(&app, &owner, &home, "bill_receipt").await;
+    let res = app
+        .clone()
+        .oneshot(authed(
+            "DELETE",
+            format!("/attachments/{owners_file}"),
+            &member,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::FORBIDDEN,
+        "delete by non-uploader member"
+    );
+
+    // cover by a non-owner → 403
+    let cover = upload_ready(&app, &member, &home, "home_cover").await;
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/homes/{home}"))
+                .header(header::AUTHORIZATION, format!("Bearer {member}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"cover_id": cover}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN, "cover by non-owner");
+
+    // someone else's avatar → 400
+    let their_avatar = upload_ready(&app, &member, &home, "avatar").await;
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/me")
+                .header(header::AUTHORIZATION, format!("Bearer {owner}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"avatar_id": their_avatar}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::BAD_REQUEST,
+        "someone else's avatar"
+    );
+}

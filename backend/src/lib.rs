@@ -1,10 +1,13 @@
 pub mod activity;
+pub mod attachments;
 pub mod auth;
 pub mod config;
 pub mod error;
 pub mod models;
 pub mod routes;
 pub mod state;
+pub mod storage;
+pub mod sweep;
 
 use axum::{
     extract::State,
@@ -23,6 +26,7 @@ use tower_http::{
 pub fn create_app(state: state::AppState, cors_origins: Option<&[String]>) -> Router {
     Router::new()
         .route("/health", get(health))
+        .merge(routes::attachments::router())
         .merge(routes::auth::router())
         .merge(routes::homes::router())
         .merge(routes::lists::router())

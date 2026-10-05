@@ -17,6 +17,9 @@
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_API_URL": "https://homesy-api.gilla.fun"
+      },
+      "android": {
+        "buildType": "apk"
       }
     },
     "preview-simulator": {

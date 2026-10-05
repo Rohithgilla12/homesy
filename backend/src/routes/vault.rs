@@ -1,5 +1,6 @@
 use crate::{
     activity::log_activity,
+    attachments::Kind,
     auth::{ensure_member, AuthUser},
     error::{AppError, AppResult},
     models::VaultEntry,
@@ -37,6 +38,8 @@ struct CreateEntry {
     is_secret: bool,
     #[serde(default)]
     pinned: bool,
+    #[serde(default)]
+    attachment_ids: Vec<Uuid>,
 }
 
 #[derive(Deserialize, Default)]
@@ -46,6 +49,8 @@ struct UpdateEntry {
     value: Option<String>,
     is_secret: Option<bool>,
     pinned: Option<bool>,
+    /// Full replacement of the entry's documents when present.
+    attachment_ids: Option<Vec<Uuid>>,
 }
 
 fn check_category(c: &str) -> AppResult<()> {
@@ -68,6 +73,63 @@ async fn entry_home(pool: &sqlx::PgPool, uid: Uuid, entry_id: Uuid) -> AppResult
     Ok(home_id)
 }
 
+/// Replaces an entry's documents in order; documents dropped from the list are deleted.
+async fn set_documents(s: &AppState, home_id: Uuid, entry_id: Uuid, ids: &[Uuid]) -> AppResult<()> {
+    for id in ids {
+        crate::attachments::load_for_owner(&s.pool, *id, home_id, Kind::VaultDocument).await?;
+    }
+    let old: Vec<(Uuid,)> =
+        sqlx::query_as("select attachment_id from vault_entry_attachments where entry_id = $1")
+            .bind(entry_id)
+            .fetch_all(&s.pool)
+            .await?;
+    let dropped: Vec<Uuid> = old
+        .iter()
+        .map(|r| r.0)
+        .filter(|id| !ids.contains(id))
+        .collect();
+    sqlx::query("delete from vault_entry_attachments where entry_id = $1")
+        .bind(entry_id)
+        .execute(&s.pool)
+        .await?;
+    for (i, id) in ids.iter().enumerate() {
+        sqlx::query(
+            "insert into vault_entry_attachments (entry_id, attachment_id, position) values ($1, $2, $3)",
+        )
+        .bind(entry_id)
+        .bind(id)
+        .bind(i as i32)
+        .execute(&s.pool)
+        .await?;
+    }
+    crate::routes::attachments::delete_many(s, &dropped).await
+}
+
+/// Embeds presigned document URLs in position order; a no-op when storage is off.
+async fn decorate(s: &AppState, mut rows: Vec<VaultEntry>) -> AppResult<Vec<VaultEntry>> {
+    let entry_ids: Vec<Uuid> = rows.iter().map(|r| r.id).collect();
+    let links: Vec<(Uuid, Uuid)> = sqlx::query_as(
+        "select entry_id, attachment_id from vault_entry_attachments where entry_id = any($1) order by position",
+    )
+    .bind(&entry_ids)
+    .fetch_all(&s.pool)
+    .await?;
+    let ids: Vec<Uuid> = links.iter().map(|l| l.1).collect();
+    let outs = crate::attachments::outs_for(&s.pool, s.storage.as_deref(), &ids).await?;
+    for r in &mut rows {
+        r.attachments = links
+            .iter()
+            .filter(|l| l.0 == r.id)
+            .filter_map(|l| outs.get(&l.1).cloned())
+            .collect();
+    }
+    Ok(rows)
+}
+
+async fn decorate_one(s: &AppState, row: VaultEntry) -> AppResult<VaultEntry> {
+    Ok(decorate(s, vec![row]).await?.remove(0))
+}
+
 async fn list_entries(
     State(s): State<AppState>,
     AuthUser(uid): AuthUser,
@@ -80,7 +142,7 @@ async fn list_entries(
     .bind(home_id)
     .fetch_all(&s.pool)
     .await?;
-    Ok(Json(rows))
+    Ok(Json(decorate(&s, rows).await?))
 }
 
 async fn create_entry(
@@ -109,6 +171,8 @@ async fn create_entry(
     .bind(uid)
     .fetch_one(&s.pool)
     .await?;
+    set_documents(&s, home_id, row.id, &b.attachment_ids).await?;
+    let row = decorate_one(&s, row).await?;
 
     s.broadcast(crate::models::HomeEvent {
         home_id,
@@ -157,6 +221,10 @@ async fn update_entry(
     .bind(b.pinned)
     .fetch_one(&s.pool)
     .await?;
+    if let Some(ids) = &b.attachment_ids {
+        set_documents(&s, home_id, entry_id, ids).await?;
+    }
+    let row = decorate_one(&s, row).await?;
 
     s.broadcast(crate::models::HomeEvent {
         home_id,
@@ -190,6 +258,13 @@ async fn delete_entry(
             .fetch_optional(&s.pool)
             .await?;
 
+    let docs: Vec<(Uuid,)> =
+        sqlx::query_as("select attachment_id from vault_entry_attachments where entry_id = $1")
+            .bind(entry_id)
+            .fetch_all(&s.pool)
+            .await?;
+    crate::routes::attachments::delete_many(&s, &docs.iter().map(|d| d.0).collect::<Vec<_>>())
+        .await?;
     sqlx::query("delete from vault_entries where id = $1")
         .bind(entry_id)
         .execute(&s.pool)

@@ -1484,3 +1484,61 @@ async fn bill_receipt_attaches_and_rejects_foreign_attachment() {
     assert_eq!(bill["receipt"]["id"].as_str().unwrap(), mine);
     assert!(bill["receipt"]["url"].as_str().unwrap().starts_with("http"));
 }
+
+#[tokio::test]
+async fn vault_entry_documents_replace_and_cascade() {
+    let Some(storage) = storage_for_tests() else {
+        return;
+    };
+    let (pool, state) = setup_test_db().await;
+    let app = create_app(state.with_storage(Some(storage)), None);
+    let (token, home) = signup_and_home(&app).await;
+    let d1 = upload_ready(&app, &token, &home, "vault_document").await;
+    let d2 = upload_ready(&app, &token, &home, "vault_document").await;
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/vault"),
+            &token,
+            json!({"category":"documents","label":"Lease","value":"Flat 4B","attachment_ids":[d1, d2]}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let entry = parse_json_response(res.into_body()).await;
+    assert_eq!(entry["attachments"].as_array().map(|a| a.len()), Some(2));
+    let entry_id = entry["id"].as_str().unwrap().to_string();
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/vault/{entry_id}"))
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"attachment_ids":[d2]}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let entry = parse_json_response(res.into_body()).await;
+    assert_eq!(entry["attachments"][0]["id"].as_str().unwrap(), d2);
+    let (n,): (i64,) = sqlx::query_as("select count(*) from attachments where id = $1")
+        .bind(Uuid::parse_str(&d1).unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 0, "dropped document is deleted");
+
+    app.clone()
+        .oneshot(authed("DELETE", format!("/vault/{entry_id}"), &token))
+        .await
+        .unwrap();
+    let (n,): (i64,) = sqlx::query_as("select count(*) from attachments where id = $1")
+        .bind(Uuid::parse_str(&d2).unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 0, "entry delete removes its documents");
+}

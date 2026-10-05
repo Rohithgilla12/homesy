@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, RefreshControl, StyleSheet, Switch, TextInput, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
-  FadeIn, FadeOut, LinearTransition, useAnimatedReaction, useAnimatedStyle, useSharedValue, withSpring,
+  FadeIn, FadeOut, LinearTransition, useReducedMotion, useAnimatedReaction, useAnimatedStyle, useSharedValue, withSpring,
 } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 import { api } from '@/api/client';
@@ -113,6 +113,14 @@ export default function ListDetailScreen() {
   const open = items.filter((i) => !i.done);
   const done = items.filter((i) => i.done);
   const submitAdd = () => { if (title.trim()) add.mutate(); };
+  // Rows mount and move with layout animations; under Reduce Motion they snap instead. Reanimated's own
+  // reduce-motion handling parks a late-mounted row at its entering state, so the props are left off entirely.
+  const reduce = useReducedMotion();
+  const rowAnim = (delay: number) => reduce ? {} : {
+    layout: LinearTransition.duration(220).easing(motion.sheetIn.easing),
+    entering: FadeIn.duration(180).delay(delay),
+    exiting: FadeOut.duration(160),
+  };
 
   return (
     <>
@@ -169,7 +177,7 @@ export default function ListDetailScreen() {
         {open.length > 0 ? (
           <Card padded={false} style={{ overflow: 'hidden' }}>
             {open.map((it, i) => (
-              <Animated.View key={it.id} layout={LinearTransition.duration(220).easing(motion.sheetIn.easing)} entering={FadeIn.duration(180)} exiting={FadeOut.duration(160)}>
+              <Animated.View key={it.id} {...rowAnim(0)}>
                 <LiveRow fresh={fresh.has(it.id)}>
                   <SwipeRow onComplete={() => tick(it)} onDelete={() => confirmDelete(it)} last={i === open.length - 1}>
                     <AnimatedCheck checked={ticking.has(it.id)} onPress={() => tick(it)} label={`Tick off ${it.title}`} />
@@ -193,7 +201,7 @@ export default function ListDetailScreen() {
             <Text variant="caption" tone="muted" style={{ marginLeft: space(1) }}>Done · {done.length}</Text>
             <Card padded={false} style={{ overflow: 'hidden', backgroundColor: color.surfaceSunk }}>
               {done.map((it, i) => (
-                <Animated.View key={it.id} layout={LinearTransition.duration(220).easing(motion.sheetIn.easing)} entering={FadeIn.duration(180).delay(60)} exiting={FadeOut.duration(160)}>
+                <Animated.View key={it.id} {...rowAnim(60)}>
                   <View style={[s.row, i === done.length - 1 && s.rowLast]}>
                     <AnimatedCheck checked onPress={() => tick(it)} label={`Bring back ${it.title}`} />
                     <View style={{ flex: 1 }}><StrikeText struck variant="body">{it.title}</StrikeText></View>

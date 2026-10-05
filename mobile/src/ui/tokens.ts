@@ -2,7 +2,7 @@ import { Easing } from 'react-native-reanimated';
 
 export const color = {
   bg: '#F6F5F1', surface: '#FFFFFF', surfaceSunk: '#F0EEE8', ink: '#15171C', ink2: '#3B3F47', muted: '#5F646E',
-  line: '#E6E3DC', accent: '#2747C9', accentSoft: '#E9EDFB', accentInk: '#1F3AA8', scrim: 'rgba(21,23,28,0.4)', onAccent: '#FFFFFF',
+  line: '#E6E3DC', lineStrong: '#A8ACB4', accent: '#2747C9', accentSoft: '#E9EDFB', accentInk: '#1F3AA8', scrim: 'rgba(21,23,28,0.4)', onAccent: '#FFFFFF',
 } as const;
 
 export const status = {

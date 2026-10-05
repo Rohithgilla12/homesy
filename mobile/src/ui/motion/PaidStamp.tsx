@@ -6,14 +6,19 @@ import { Icon } from '../Icon';
 import { Text } from '../Text';
 import { color, motion, radius, space, status } from '../tokens';
 
-/** The official "paid" seal: shield springs in, one ring pulse, text rises (MotionPaid prototype). */
-export function PaidStamp({ by, when, refText }: { by: string; when: string; refText?: string | null }) {
+/**
+ * The official "paid" seal (MotionPaid prototype). Static by default; `animate` (the bill was just paid
+ * in this session) springs the shield in, pulses the ring once, raises the text and plays a success haptic.
+ */
+export function PaidStamp({ by, when, refText, animate = false }: { by: string; when: string; refText?: string | null; animate?: boolean }) {
   const reduce = useReducedMotion();
-  const seal = useSharedValue(reduce ? 1 : 0);
-  const ring = useSharedValue(0);
-  const text = useSharedValue(reduce ? 1 : 0);
+  const still = reduce || !animate;
+  const seal = useSharedValue(still ? 1 : 0);
+  const ring = useSharedValue(still ? 1 : 0);
+  const text = useSharedValue(still ? 1 : 0);
 
   useEffect(() => {
+    if (!animate) return;
     haptic.success();
     if (reduce) return;
     seal.value = withSpring(1, motion.spring);
@@ -26,7 +31,7 @@ export function PaidStamp({ by, when, refText }: { by: string; when: string; ref
     transform: [{ scale: 0.4 + 0.6 * seal.value }, { rotate: `${-14 * (1 - seal.value)}deg` }],
   }));
   const ringStyle = useAnimatedStyle(() => ({
-    opacity: reduce ? 0 : 0.7 * (1 - ring.value),
+    opacity: still ? 0 : 0.7 * (1 - ring.value),
     transform: [{ scale: 0.7 + 1.2 * ring.value }],
   }));
   const textStyle = useAnimatedStyle(() => ({ opacity: text.value, transform: [{ translateY: 5 * (1 - text.value) }] }));

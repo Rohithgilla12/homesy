@@ -18,6 +18,7 @@ export function AppHeader() {
   const { data: homes = [] } = useQuery({ queryKey: ['homes'], queryFn: api.homes });
   const { activeHomeId, setActiveHome } = useActiveHome();
   const user = useSession((s) => s.user);
+  const { data: me } = useQuery({ queryKey: ['me'], queryFn: api.me, enabled: !!user });
   const [open, setOpen] = useState(false);
   const active = homes.find((h) => h.id === activeHomeId) ?? homes[0];
 
@@ -35,7 +36,7 @@ export function AppHeader() {
           <Icon name="chevronDown" size={16} tint={color.muted} />
         </Pressable>
       ) : <View />}
-      {user ? <Avatar userId={user.id} name={user.display_name} /> : null}
+      {user ? <Avatar userId={user.id} name={user.display_name} uri={me?.avatar?.url} /> : null}
       <HomeSwitcherSheet visible={open} onClose={() => setOpen(false)} />
     </View>
   );

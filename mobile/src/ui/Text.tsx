@@ -5,7 +5,7 @@ const tones = {
   ink: color.ink, ink2: color.ink2, muted: color.muted, accent: color.accent, accentInk: color.accentInk,
   warn: status.warnInk, ok: status.okInk, danger: status.danger, onAccent: color.onAccent,
 } as const;
-type Layout = Pick<TextStyle, 'margin' | 'marginTop' | 'marginBottom' | 'marginLeft' | 'marginRight' | 'marginHorizontal' | 'marginVertical' | 'textAlign' | 'flex' | 'flexShrink' | 'alignSelf' | 'textDecorationLine' | 'fontVariant'>;
+type Layout = Pick<TextStyle, 'margin' | 'marginTop' | 'marginBottom' | 'marginLeft' | 'marginRight' | 'marginHorizontal' | 'marginVertical' | 'textAlign' | 'flex' | 'flexShrink' | 'alignSelf' | 'textDecorationLine' | 'fontVariant' | 'letterSpacing' | 'fontSize' | 'lineHeight'>;
 
 export type TextVariant = keyof typeof typo;
 /** `color` overrides `tone` for tinted surfaces (pills, category tiles); pass a token value, never a literal. */

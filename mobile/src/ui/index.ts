@@ -18,3 +18,4 @@ export * from './motion';
 export { AppHeader } from './AppHeader';
 export { TabBar } from './TabBar';
 export { HomeSwitcherSheet, HOME_EMOJI } from './HomeSwitcherSheet';
+export { AuthShell } from './AuthShell';

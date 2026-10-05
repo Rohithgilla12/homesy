@@ -19,3 +19,21 @@ describe('attachment helpers', () => {
     expect(uploadKindAllows('avatar', 'image/png')).toBe(true);
   });
 });
+
+jest.mock('expo-file-system/legacy', () => ({
+  getInfoAsync: jest.fn(async () => ({ exists: true, size: 4321 })),
+  createUploadTask: jest.fn(),
+  FileSystemUploadType: { BINARY_CONTENT: 1 },
+}));
+jest.mock('expo-image-manipulator', () => ({ ImageManipulator: { manipulate: jest.fn() }, SaveFormat: { JPEG: 'jpeg' } }));
+
+describe('resolveSize', () => {
+  const { resolveSize } = require('../attachments');
+  it('keeps a positive picker size', async () => {
+    expect(await resolveSize('file:///a', 10)).toBe(10);
+  });
+  it('reads the file when the picker gives no size', async () => {
+    expect(await resolveSize('file:///a', undefined)).toBe(4321);
+    expect(await resolveSize('file:///a', 0)).toBe(4321);
+  });
+});

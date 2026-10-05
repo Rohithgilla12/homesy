@@ -33,6 +33,13 @@ export function sizeLimitFor(contentType: string): number {
   return contentType === 'application/pdf' ? MAX_PDF_BYTES : MAX_IMAGE_BYTES;
 }
 
+/** Pickers do not always report a size; the API refuses 0, so read the file when it is missing. */
+export async function resolveSize(uri: string, reported: number | undefined | null): Promise<number> {
+  if (reported && reported > 0) return reported;
+  const info = await FileSystem.getInfoAsync(uri);
+  return info.exists ? info.size : 0;
+}
+
 /** Resizes and re-encodes when needed so the declared content type matches the bytes. */
 export async function prepareImage(file: PickedFile): Promise<PickedFile> {
   const longEdge = Math.max(file.width ?? 0, file.height ?? 0);

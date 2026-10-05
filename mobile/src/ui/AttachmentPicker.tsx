@@ -2,7 +2,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { useState } from 'react';
 import { Alert, StyleSheet } from 'react-native';
-import { pickContentType, sizeLimitFor, uploadAttachment, uploadKindAllows, type PickedFile } from '@/api/attachments';
+import { pickContentType, resolveSize, sizeLimitFor, uploadAttachment, uploadKindAllows, type PickedFile } from '@/api/attachments';
 import type { Attachment, AttachmentKind } from '@/api/types';
 import { friendlyError } from '@/lib/errors';
 import { useFeatures } from '@/store/features';
@@ -37,12 +37,12 @@ export function AttachmentPicker({ homeId, kind, onUploaded, allowPdf = false, l
     }
   };
 
-  const fromImage = (res: ImagePicker.ImagePickerResult) => {
+  const fromImage = async (res: ImagePicker.ImagePickerResult) => {
     const a = res.assets?.[0];
     if (res.canceled || !a) return;
     const contentType = pickContentType(a.fileName ?? a.uri, a.mimeType ?? undefined);
     if (!contentType) return Alert.alert('Unsupported file', 'Choose a JPEG, PNG, WebP or HEIC photo.');
-    upload({ uri: a.uri, contentType, sizeBytes: a.fileSize ?? 0, width: a.width, height: a.height });
+    upload({ uri: a.uri, contentType, sizeBytes: await resolveSize(a.uri, a.fileSize), width: a.width, height: a.height });
   };
 
   const takePhoto = async () => {
@@ -55,7 +55,7 @@ export function AttachmentPicker({ homeId, kind, onUploaded, allowPdf = false, l
     const res = await DocumentPicker.getDocumentAsync({ type: 'application/pdf', copyToCacheDirectory: true });
     const a = res.assets?.[0];
     if (res.canceled || !a) return;
-    upload({ uri: a.uri, contentType: 'application/pdf', sizeBytes: a.size ?? 0 });
+    upload({ uri: a.uri, contentType: 'application/pdf', sizeBytes: await resolveSize(a.uri, a.size) });
   };
 
   const choose = () => Alert.alert(title, undefined, [

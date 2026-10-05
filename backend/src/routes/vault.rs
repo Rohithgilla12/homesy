@@ -73,15 +73,26 @@ async fn entry_home(pool: &sqlx::PgPool, uid: Uuid, entry_id: Uuid) -> AppResult
     Ok(home_id)
 }
 
-/// Replaces an entry's documents in order; documents dropped from the list are deleted.
-async fn set_documents(s: &AppState, home_id: Uuid, entry_id: Uuid, ids: &[Uuid]) -> AppResult<()> {
+/// Validates and dedupes the ids a client sent, before anything is written.
+async fn checked_documents(s: &AppState, home_id: Uuid, ids: &[Uuid]) -> AppResult<Vec<Uuid>> {
+    let mut out: Vec<Uuid> = Vec::with_capacity(ids.len());
     for id in ids {
+        if out.contains(id) {
+            continue;
+        }
         crate::attachments::load_for_owner(&s.pool, *id, home_id, Kind::VaultDocument).await?;
+        out.push(*id);
     }
+    Ok(out)
+}
+
+/// Replaces an entry's documents in order inside one transaction; documents dropped from the list are deleted.
+async fn set_documents(s: &AppState, entry_id: Uuid, ids: &[Uuid]) -> AppResult<()> {
+    let mut tx = s.pool.begin().await?;
     let old: Vec<(Uuid,)> =
         sqlx::query_as("select attachment_id from vault_entry_attachments where entry_id = $1")
             .bind(entry_id)
-            .fetch_all(&s.pool)
+            .fetch_all(&mut *tx)
             .await?;
     let dropped: Vec<Uuid> = old
         .iter()
@@ -90,7 +101,7 @@ async fn set_documents(s: &AppState, home_id: Uuid, entry_id: Uuid, ids: &[Uuid]
         .collect();
     sqlx::query("delete from vault_entry_attachments where entry_id = $1")
         .bind(entry_id)
-        .execute(&s.pool)
+        .execute(&mut *tx)
         .await?;
     for (i, id) in ids.iter().enumerate() {
         sqlx::query(
@@ -99,9 +110,10 @@ async fn set_documents(s: &AppState, home_id: Uuid, entry_id: Uuid, ids: &[Uuid]
         .bind(entry_id)
         .bind(id)
         .bind(i as i32)
-        .execute(&s.pool)
+        .execute(&mut *tx)
         .await?;
     }
+    tx.commit().await?;
     crate::routes::attachments::delete_many(s, &dropped).await
 }
 
@@ -157,6 +169,7 @@ async fn create_entry(
     if label.is_empty() || b.value.trim().is_empty() {
         return Err(AppError::BadRequest("label and value required".into()));
     }
+    let docs = checked_documents(&s, home_id, &b.attachment_ids).await?;
     let row: VaultEntry = sqlx::query_as(&format!(
         "insert into vault_entries (id, home_id, category, label, value, is_secret, pinned, created_by)
          values ($1, $2, $3, $4, $5, $6, $7, $8) returning {COLS}"
@@ -171,7 +184,7 @@ async fn create_entry(
     .bind(uid)
     .fetch_one(&s.pool)
     .await?;
-    set_documents(&s, home_id, row.id, &b.attachment_ids).await?;
+    set_documents(&s, row.id, &docs).await?;
     let row = decorate_one(&s, row).await?;
 
     s.broadcast(crate::models::HomeEvent {
@@ -203,6 +216,10 @@ async fn update_entry(
     if let Some(c) = &b.category {
         check_category(c)?;
     }
+    let docs = match &b.attachment_ids {
+        Some(ids) => Some(checked_documents(&s, home_id, ids).await?),
+        None => None,
+    };
     let row: VaultEntry = sqlx::query_as(&format!(
         "update vault_entries set
             category   = coalesce($2, category),
@@ -221,8 +238,8 @@ async fn update_entry(
     .bind(b.pinned)
     .fetch_one(&s.pool)
     .await?;
-    if let Some(ids) = &b.attachment_ids {
-        set_documents(&s, home_id, entry_id, ids).await?;
+    if let Some(ids) = &docs {
+        set_documents(&s, entry_id, ids).await?;
     }
     let row = decorate_one(&s, row).await?;
 

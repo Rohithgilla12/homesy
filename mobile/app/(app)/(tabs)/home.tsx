@@ -1,14 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Image, ScrollView, Share, StyleSheet, Switch, View } from 'react-native';
+import { Alert, ScrollView, Share, StyleSheet, Switch, View } from 'react-native';
 import { api } from '@/api/client';
 import { friendlyError } from '@/lib/errors';
 import { useCelebrate } from '@/store/celebrate';
 import { useActiveHome } from '@/store/home';
 import { useSession } from '@/store/session';
 import {
-  AttachmentPicker, Avatar, Button, Card, Chip, HOME_EMOJI, IconButton, Input, Pill, Screen, Sheet, Text, color, radius, space, status,
+  AttachmentPicker, Avatar, Button, Card, Chip, CoverImage, HOME_EMOJI, IconButton, Input, Pill, Screen, Sheet, Text, color, radius, space, status,
 } from '@/ui';
 
 export default function HomeScreen() {
@@ -172,7 +172,7 @@ export default function HomeScreen() {
   return (
     <>
       <Screen scroll>
-        {detail?.cover ? <Image source={{ uri: detail.cover.url }} accessibilityLabel="Home cover photo" style={s.cover} onError={() => qc.invalidateQueries({ queryKey: ['home', activeHomeId] })} /> : null}
+        {detail?.cover ? <CoverImage uri={detail.cover.url} onExpired={() => qc.invalidateQueries({ queryKey: ['home', activeHomeId] })} /> : null}
         <View style={s.rowBetween}>
           <Text variant="display" style={{ flex: 1 }}>{detail ? detail.name : ' '}</Text>
         </View>
@@ -294,7 +294,6 @@ export default function HomeScreen() {
 
 const s = StyleSheet.create({
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space(2) },
-  cover: { height: 140, borderRadius: radius.lg, backgroundColor: color.surfaceSunk },
   note: { flexDirection: 'row', alignItems: 'flex-start', gap: space(2), backgroundColor: color.surfaceSunk, borderRadius: radius.md, padding: space(3) },
   noteUrgent: { backgroundColor: status.dangerSoft },
   member: { flexDirection: 'row', alignItems: 'center', gap: space(3), paddingVertical: space(3), borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: color.line },

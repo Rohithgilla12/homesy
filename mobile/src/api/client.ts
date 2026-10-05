@@ -1,6 +1,8 @@
 import { useSession } from '@/store/session';
 import type {
   Activity,
+  Attachment,
+  AttachmentKind,
   BulletinNotice,
   Home,
   HomeDetail,
@@ -51,12 +53,22 @@ export const api = {
   login: (b: { email: string; password: string }) =>
     request<{ token: string; user: User }>('/auth/login', { method: 'POST', body: json(b) }),
   me: () => request<User>('/me'),
+  updateMe: (b: { display_name?: string; avatar_id?: string | null }) => request<User>('/me', { method: 'PATCH', body: json(b) }),
+  config: () => request<{ attachments: boolean }>('/config'),
+
+  // attachments: create a slot, PUT the bytes to upload_url, then complete
+  createAttachment: (homeId: string, b: { kind: AttachmentKind; content_type: string; size_bytes: number }) =>
+    request<{ id: string; upload_url: string; expires_at: string }>(`/homes/${homeId}/attachments`, { method: 'POST', body: json(b) }),
+  completeAttachment: (id: string) => request<Attachment>(`/attachments/${id}/complete`, { method: 'POST' }),
+  deleteAttachment: (id: string) => request<{ ok: true }>(`/attachments/${id}`, { method: 'DELETE' }),
 
   // homes
   homes: () => request<Home[]>('/homes'),
   home: (id: string) => request<HomeDetail>(`/homes/${id}`),
   createHome: (b: { name: string; emoji?: string }) => request<Home>('/homes', { method: 'POST', body: json(b) }),
   joinHome: (code: string) => request<Home>('/homes/join', { method: 'POST', body: json({ code }) }),
+  updateHome: (id: string, b: { name?: string; emoji?: string; cover_id?: string | null }) =>
+    request<Home>(`/homes/${id}`, { method: 'PATCH', body: json(b) }),
   leaveHome: (id: string) => request<{ ok: true }>(`/homes/${id}/leave`, { method: 'POST' }),
 
   // activity
@@ -84,9 +96,9 @@ export const api = {
 
   // vault
   vault: (homeId: string) => request<VaultEntry[]>(`/homes/${homeId}/vault`),
-  createVault: (homeId: string, b: { category: VaultCategory; label: string; value: string; is_secret?: boolean; pinned?: boolean }) =>
+  createVault: (homeId: string, b: { category: VaultCategory; label: string; value: string; is_secret?: boolean; pinned?: boolean; attachment_ids?: string[] }) =>
     request<VaultEntry>(`/homes/${homeId}/vault`, { method: 'POST', body: json(b) }),
-  updateVault: (id: string, b: Partial<{ category: VaultCategory; label: string; value: string; is_secret: boolean; pinned: boolean }>) =>
+  updateVault: (id: string, b: Partial<{ category: VaultCategory; label: string; value: string; is_secret: boolean; pinned: boolean; attachment_ids: string[] }>) =>
     request<VaultEntry>(`/vault/${id}`, { method: 'PATCH', body: json(b) }),
   deleteVault: (id: string) => request<{ ok: true }>(`/vault/${id}`, { method: 'DELETE' }),
 
@@ -102,6 +114,7 @@ export const api = {
       account_number?: string;
       due_date?: string;
       notes?: string;
+      receipt_id?: string | null;
     }
   ) => request<HouseholdBill>(`/homes/${homeId}/bills`, { method: 'POST', body: json(b) }),
   updateBill: (
@@ -114,6 +127,7 @@ export const api = {
       account_number: string;
       due_date: string;
       notes: string;
+      receipt_id: string | null;
     }>
   ) => request<HouseholdBill>(`/bills/${id}`, { method: 'PATCH', body: json(b) }),
   // paid_by defaults to the caller on the backend

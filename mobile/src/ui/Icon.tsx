@@ -1,6 +1,6 @@
 import {
-  Building2, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Copy, Droplet, Ellipsis, Eye, EyeOff, FileText, Flame, Folder, Globe,
-  House, KeyRound, ListChecks, Lock, LogOut, Package, Pencil, Phone, Pin, Plus, QrCode, Receipt, RefreshCw, Share, Shirt, ShieldCheck,
+  Building2, Camera, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Copy, Droplet, Ellipsis, Eye, EyeOff, FileText, Flame, Folder, Globe,
+  House, Image as ImageIcon, KeyRound, ListChecks, Lock, LogOut, Package, Pencil, Phone, Pin, Plus, QrCode, Receipt, RefreshCw, Share, Shirt, ShieldCheck,
   ShoppingCart, Sparkles, SquareCheck, StickyNote, Trash2, Undo2, Users, Wifi, X, Zap, type LucideIcon,
 } from 'lucide-react-native';
 import { color } from './tokens';
@@ -13,6 +13,7 @@ const ICONS = {
   add: Plus, edit: Pencil, copy: Copy, copied: Check, delete: Trash2, reveal: Eye, hide: EyeOff, qr: QrCode, share: Share, paid: ShieldCheck,
   due: Clock, pin: Pin, undo: Undo2, nextCycle: RefreshCw, more: Ellipsis, chevronDown: ChevronDown, chevronRight: ChevronRight, back: ChevronLeft,
   close: X, members: Users, note: StickyNote, signOut: LogOut, check: Check,
+  photo: ImageIcon, document: FileText, camera: Camera,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

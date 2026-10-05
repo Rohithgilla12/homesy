@@ -53,6 +53,7 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@testing-library/react-native": "^14.0.1",
     "@types/jest": "29.5.14",
     "@types/react": "~19.2.10",
     "jest": "~29.7.0",
@@ -63,6 +64,15 @@
     "preset": "jest-expo",
     "testMatch": [
       "**/__tests__/**/*.test.ts?(x)"
-    ]
+    ],
+    "resolver": "react-native-worklets/jest/resolver.js",
+    "transformIgnorePatterns": [
+      "/node_modules/(?!(lucide-react-native|react-native-worklets|react-native-reanimated|.pnpm|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|@sentry/react-native|native-base|standard-navigation))",
+      "/node_modules/react-native-reanimated/plugin/",
+      "/node_modules/@react-native/babel-preset/"
+    ],
+    "moduleNameMapper": {
+      "^lucide-react-native$": "<rootDir>/node_modules/lucide-react-native/dist/cjs/lucide-react-native.js"
+    }
   }
 }

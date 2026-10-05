@@ -18,25 +18,31 @@ export default function AppLayout() {
   // Realtime SSE sync: invalidates caches on changes while viewing active home
   useHomeEvents(activeHomeId);
 
-  if (isLoading) return <View style={{ flex: 1, justifyContent: 'center', backgroundColor: color.bg }}><ActivityIndicator color={color.accent} /></View>;
-  // No homes yet → the Home screen doubles as onboarding (create or join). It renders without a
-  // header or tab bar, so it needs its own safe-area padding.
-  if (homes && homes.length === 0) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: color.bg }} edges={['top', 'bottom']}>
+  // The confetti overlay is a sibling of both branches so it never remounts when onboarding hands over to the
+  // tabs, and a burst fired on the last onboarding frame still plays out.
+  let body;
+  if (isLoading) {
+    body = <View style={{ flex: 1, justifyContent: 'center' }}><ActivityIndicator color={color.accent} /></View>;
+  } else if (homes && homes.length === 0) {
+    // No homes yet → the Home screen doubles as onboarding (create or join). It renders without a
+    // header or tab bar, so it needs its own safe-area padding.
+    body = (
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
         <Onboarding />
-        <Confetti fire={celebrate} />
       </SafeAreaView>
     );
-  }
-
-  // The confetti overlay sits above the whole stack so a burst outlives the screen that fired it.
-  return (
-    <View style={{ flex: 1 }}>
+  } else {
+    body = (
       <Stack screenOptions={{ headerStyle: { backgroundColor: color.bg }, headerShadowVisible: false, headerTintColor: color.accentInk, headerTitleStyle: { fontFamily: font.semibold, color: color.ink } }}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="lists/[id]" options={{ headerBackTitle: 'Lists' }} />
       </Stack>
+    );
+  }
+
+  return (
+    <View style={{ flex: 1, backgroundColor: color.bg }}>
+      {body}
       <Confetti fire={celebrate} />
     </View>
   );

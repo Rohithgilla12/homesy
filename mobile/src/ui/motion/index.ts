@@ -7,3 +7,4 @@ export { BlurReveal } from './BlurReveal';
 export { useRoofRefresh } from './RoofRefresh';
 export { Confetti } from './Confetti';
 export { ColdStart } from './ColdStart';
+export { useFreshRows } from './useFreshRows';

@@ -9,12 +9,11 @@ import Animated, {
 import { scheduleOnRN } from 'react-native-worklets';
 import { api } from '@/api/client';
 import type { ListItem } from '@/api/types';
-import { isFreshFromOthers } from '@/lib/activity';
 import { friendlyError } from '@/lib/errors';
 import { useActiveHome } from '@/store/home';
 import { useSession } from '@/store/session';
 import {
-  AnimatedCheck, Button, Card, Chip, EmptyState, Icon, IconButton, Input, LiveRow, Pill, Screen, Sheet, StrikeText, Text,
+  AnimatedCheck, Button, Card, Chip, EmptyState, Icon, IconButton, Input, LiveRow, Pill, Screen, Sheet, StrikeText, Text, useFreshRows,
   color, haptic, motion, radius, space, status, type as typo,
   useManualRefresh,
 } from '@/ui';
@@ -49,19 +48,12 @@ export default function ListDetailScreen() {
     qc.invalidateQueries({ queryKey: ['lists', homeId] });
   };
 
-  // Ids present on first load or added by me never get the live highlight; only later arrivals from others do.
-  const seen = useRef<Set<string> | null>(null);
-  const fresh = new Set<string>();
-  if (isSuccess) {
-    if (!seen.current) seen.current = new Set(items.map((i) => i.id));
-    for (const it of items) if (!seen.current.has(it.id) && isFreshFromOthers(it.created_by, me?.id)) fresh.add(it.id);
-  }
-  useEffect(() => { if (seen.current) items.forEach((i) => seen.current!.add(i.id)); }, [items]);
+  const { fresh, markSeen } = useFreshRows(id, items, isSuccess, (it) => it.created_by, me?.id);
 
   const add = useMutation({
     mutationFn: () => api.createItem(id, { title: title.trim(), qty: qty.trim() || undefined, note: note.trim() || undefined }),
     onSuccess: (created) => {
-      seen.current?.add(created.id);
+      markSeen(created.id);
       setTitle(''); setQty(''); setNote(''); setShowQty(false); setShowNote(false);
       invalidate();
     },

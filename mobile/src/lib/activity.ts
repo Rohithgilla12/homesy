@@ -29,3 +29,18 @@ export function groupByDay<T extends { created_at: string }>(rows: T[], now: Dat
 export function isFreshFromOthers(createdBy: string | null | undefined, currentUserId: string | null | undefined): boolean {
   return Boolean(createdBy && currentUserId && createdBy !== currentUserId);
 }
+
+/**
+ * Ids that just arrived from other members and have not been shown yet. Mutates `seen`: every id in `rows`
+ * is marked seen, so a row is returned at most once. On the first load nothing is fresh.
+ */
+export function freshArrivals<T extends { id: string }>(
+  seen: Set<string>, rows: T[], actorOf: (row: T) => string | null | undefined, me: string | null | undefined, firstLoad: boolean,
+): string[] {
+  const fresh: string[] = [];
+  for (const r of rows) {
+    if (!firstLoad && !seen.has(r.id) && isFreshFromOthers(actorOf(r), me)) fresh.push(r.id);
+    seen.add(r.id);
+  }
+  return fresh;
+}

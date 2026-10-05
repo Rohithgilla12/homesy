@@ -24,6 +24,58 @@ const isWifiEntry = (e: VaultEntry) => {
   return l.includes('wifi') || l.includes('wi-fi') || (e.category === 'access' && ['network', 'internet', 'router', 'pass'].some((w) => l.includes(w)));
 };
 
+type EntryActions = {
+  reveal: (id: string) => void; copy: (e: VaultEntry) => void; edit: (e: VaultEntry) => void;
+  pin: (e: VaultEntry) => void; wifi: (e: VaultEntry) => void; remove: (e: VaultEntry) => void;
+};
+
+/** One vault entry. Module-level so a screen re-render (typing in a sheet, a reveal) updates rows instead of remounting them. */
+function EntryRow({ e, last, revealed, copied, actions }: { e: VaultEntry; last: boolean; revealed: boolean; copied: boolean; actions: EntryActions }) {
+  const w = isWifiEntry(e);
+  const tint = category.vault[w ? 'wifi' : e.category] ?? category.vault.other;
+  return (
+    <Pressable
+      accessibilityRole="none"
+      onLongPress={() => Alert.alert(e.label, undefined, [
+        { text: 'Edit', onPress: () => actions.edit(e) },
+        { text: e.pinned ? 'Unpin' : 'Pin to top', onPress: () => actions.pin(e) },
+        { text: 'Copy value', onPress: () => actions.copy(e) },
+        ...(w ? [{ text: 'Show Wi-Fi QR code', onPress: () => actions.wifi(e) }] : []),
+        { text: 'Delete', style: 'destructive' as const, onPress: () => actions.remove(e) },
+        { text: 'Cancel', style: 'cancel' as const },
+      ])}
+      style={[s.entry, last && s.entryLast]}
+    >
+      <View style={[s.tile, { backgroundColor: tint.bg }]}><Icon name={w ? 'vault.wifi' : `vault.${e.category}`} tint={tint.fg} /></View>
+      <View style={{ flex: 1, minWidth: 0, gap: space(1) }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space(1.5), flexWrap: 'wrap' }}>
+          <Text variant="headline">{e.label}</Text>
+          {e.pinned ? <Pill label="Pinned" tone="neutral" icon="pin" /> : null}
+          {e.is_secret ? <Pill label="Hidden" tone="neutral" /> : null}
+        </View>
+        {e.is_secret ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space(2), flexWrap: 'wrap' }}>
+            <BlurReveal masked="••••••••••" secret={e.value} revealed={revealed} drainMs={REMASK_MS} />
+            <Button title={revealed ? 'Hide' : 'Show'} icon={revealed ? 'hide' : 'reveal'} size="sm" variant="ghost" onPress={() => actions.reveal(e.id)} />
+          </View>
+        ) : (
+          <Text selectable>{e.value}</Text>
+        )}
+        {w ? (
+          <View style={{ flexDirection: 'row', gap: space(2), marginTop: space(1) }}>
+            <Button title="QR code" icon="qr" size="sm" variant="secondary" onPress={() => actions.wifi(e)} />
+            <Button title={copied ? 'Copied' : 'Copy'} icon={copied ? 'copied' : 'copy'} size="sm" variant="secondary" onPress={() => actions.copy(e)} />
+          </View>
+        ) : null}
+      </View>
+      <View style={{ flexDirection: 'row', gap: space(1) }}>
+        {!w ? <IconButton icon={copied ? 'copied' : 'copy'} label={`Copy ${e.label}`} tint={copied ? status.ok : undefined} onPress={() => actions.copy(e)} /> : null}
+        <IconButton icon="edit" label={`Edit ${e.label}`} onPress={() => actions.edit(e)} />
+      </View>
+    </Pressable>
+  );
+}
+
 export default function VaultScreen() {
   const homeId = useActiveHome((s) => s.activeHomeId);
   const qc = useQueryClient();
@@ -111,57 +163,13 @@ export default function VaultScreen() {
   const pinned = filtered.filter((e) => e.pinned);
   const groups = CATEGORIES.map((c) => ({ c, items: filtered.filter((e) => !e.pinned && e.category === c) })).filter((g) => g.items.length);
 
-  const Row = ({ e, last }: { e: VaultEntry; last: boolean }) => {
-    const w = isWifiEntry(e);
-    const tint = category.vault[w ? 'wifi' : e.category] ?? category.vault.other;
-    const isOpen = revealed.has(e.id);
-    return (
-      <Pressable
-        accessibilityRole="none"
-        onLongPress={() => Alert.alert(e.label, undefined, [
-          { text: 'Edit', onPress: () => openEdit(e) },
-          { text: e.pinned ? 'Unpin' : 'Pin to top', onPress: () => togglePin.mutate(e) },
-          { text: 'Copy value', onPress: () => copy(e) },
-          ...(w ? [{ text: 'Show Wi-Fi QR code', onPress: () => openWifi(e) }] : []),
-          { text: 'Delete', style: 'destructive' as const, onPress: () => confirmDelete(e) },
-          { text: 'Cancel', style: 'cancel' as const },
-        ])}
-        style={[s.entry, last && s.entryLast]}
-      >
-        <View style={[s.tile, { backgroundColor: tint.bg }]}><Icon name={w ? 'vault.wifi' : `vault.${e.category}`} tint={tint.fg} /></View>
-        <View style={{ flex: 1, minWidth: 0, gap: space(1) }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space(1.5), flexWrap: 'wrap' }}>
-            <Text variant="headline">{e.label}</Text>
-            {e.pinned ? <Pill label="Pinned" tone="neutral" icon="pin" /> : null}
-            {e.is_secret ? <Pill label="Hidden" tone="neutral" /> : null}
-          </View>
-          {e.is_secret ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: space(2), flexWrap: 'wrap' }}>
-              <BlurReveal masked="••••••••••" secret={e.value} revealed={isOpen} />
-              <Button title={isOpen ? 'Hide' : 'Show'} icon={isOpen ? 'hide' : 'reveal'} size="sm" variant="ghost" onPress={() => reveal(e.id)} />
-            </View>
-          ) : (
-            <Text selectable>{e.value}</Text>
-          )}
-          {w ? (
-            <View style={{ flexDirection: 'row', gap: space(2), marginTop: space(1) }}>
-              <Button title="QR code" icon="qr" size="sm" variant="secondary" onPress={() => openWifi(e)} />
-              <Button title={copied === e.id ? 'Copied' : 'Copy'} icon={copied === e.id ? 'copied' : 'copy'} size="sm" variant="secondary" onPress={() => copy(e)} />
-            </View>
-          ) : null}
-        </View>
-        <View style={{ flexDirection: 'row', gap: space(1) }}>
-          {!w ? <IconButton icon={copied === e.id ? 'copied' : 'copy'} label={`Copy ${e.label}`} tint={copied === e.id ? status.ok : undefined} onPress={() => copy(e)} /> : null}
-          <IconButton icon="edit" label={`Edit ${e.label}`} onPress={() => openEdit(e)} />
-        </View>
-      </Pressable>
-    );
-  };
-
-  const Section = ({ title, items }: { title: string; items: VaultEntry[] }) => (
-    <View style={{ gap: space(2) }}>
+  const rowActions: EntryActions = { reveal, copy, edit: openEdit, pin: (e) => togglePin.mutate(e), wifi: openWifi, remove: confirmDelete };
+  const section = (title: string, items: VaultEntry[]) => (
+    <View key={title} style={{ gap: space(2) }}>
       <Text variant="caption" tone="muted" style={{ marginLeft: space(1) }}>{title}</Text>
-      <Card padded={false}>{items.map((e, i) => <Row key={e.id} e={e} last={i === items.length - 1} />)}</Card>
+      <Card padded={false}>
+        {items.map((e, i) => <EntryRow key={e.id} e={e} last={i === items.length - 1} revealed={revealed.has(e.id)} copied={copied === e.id} actions={rowActions} />)}
+      </Card>
     </View>
   );
 
@@ -199,8 +207,8 @@ export default function VaultScreen() {
         {filtered.length === 0 ? (
           <EmptyState icon="tab.vault" title="Nothing here yet" body="Keep track of Wi-Fi passwords, maintenance contacts, and locker keys." actionLabel="Add a detail" onAction={() => setAddOpen(true)} />
         ) : null}
-        {pinned.length ? <Section title="Pinned" items={pinned} /> : null}
-        {groups.map((g) => <Section key={g.c} title={VAULT_CATEGORY_LABEL[g.c]} items={g.items} />)}
+        {pinned.length ? section('Pinned', pinned) : null}
+        {groups.map((g) => section(VAULT_CATEGORY_LABEL[g.c], g.items))}
       </Screen>
 
       <Sheet visible={addOpen} onClose={() => setAddOpen(false)} title="Add a detail">

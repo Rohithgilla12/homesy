@@ -1,14 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { RefreshControl, SectionList, StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { api } from '@/api/client';
 import type { Activity } from '@/api/types';
-import { activitySentence, groupByDay, isFreshFromOthers } from '@/lib/activity';
+import { activitySentence, groupByDay } from '@/lib/activity';
 import { relativeTime } from '@/lib/format';
 import { useActiveHome } from '@/store/home';
 import { useSession } from '@/store/session';
-import { Card, EmptyState, Icon, type IconName, LiveRow, Screen, Text, color, radius, space, status, useManualRefresh } from '@/ui';
+import { Card, EmptyState, Icon, type IconName, LiveRow, Screen, Text, color, useFreshRows, radius, space, status, useManualRefresh } from '@/ui';
 
 function iconFor(a: Activity): { name: IconName; bg: string; fg: string } {
   switch (a.resource_type) {
@@ -55,14 +55,7 @@ export default function ActivityScreen() {
 
   const { refreshing, onRefresh } = useManualRefresh(refetch);
 
-  // Rows present on first load never highlight; only later arrivals from other members do.
-  const seen = useRef<Set<string> | null>(null);
-  const fresh = new Set<string>();
-  if (isSuccess) {
-    if (!seen.current) seen.current = new Set(activities.map((a) => a.id));
-    for (const a of activities) if (!seen.current.has(a.id) && isFreshFromOthers(a.actor_id, me?.id)) fresh.add(a.id);
-  }
-  useEffect(() => { if (seen.current) activities.forEach((a) => seen.current!.add(a.id)); }, [activities]);
+  const { fresh } = useFreshRows(homeId, activities, isSuccess, (a) => a.actor_id, me?.id);
 
   const nameOf = (id: string) => home?.members.find((m) => m.user_id === id)?.display_name ?? 'Household member';
   const now = new Date();

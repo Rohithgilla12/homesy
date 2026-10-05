@@ -1,10 +1,11 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import { haptic } from '../haptics';
 import { color, status } from '../tokens';
 
 const COLORS = [color.accent, status.ok, status.warn, '#F2B544', status.danger, '#6B3FC4', color.accentInk];
+const BURST_MS = 1100;
 
 type Bit = { dx: number; dy: number; rot: number; w: number; h: number; c: string; delay: number };
 
@@ -32,15 +33,28 @@ function Particle({ b }: { b: Bit }) {
   return <Animated.View style={[s.bit, { width: b.w, height: b.h, backgroundColor: b.c }, style]} />;
 }
 
-/** One-off celebration burst; changing `fire` to a new positive number fires it (MotionConfetti prototype). */
+/**
+ * One-off celebration burst (MotionConfetti prototype). Fires only when `fire` changes after mount, so a
+ * counter that persists in a store does not replay the burst when the overlay remounts (sign-out, leaving
+ * the last home). Particles unmount once the burst has settled.
+ */
 export function Confetti({ fire }: { fire: number }) {
   const reduce = useReducedMotion();
-  const bits = useMemo(() => makeBits(fire || 1), [fire]);
-  useEffect(() => { if (fire > 0) haptic.success(); }, [fire]);
-  if (!fire || reduce) return null;
+  const handled = useRef(fire);
+  const [burst, setBurst] = useState(0);
+  useEffect(() => {
+    if (fire === handled.current) return;
+    handled.current = fire;
+    haptic.success();
+    setBurst(fire);
+    const t = setTimeout(() => setBurst(0), BURST_MS);
+    return () => clearTimeout(t);
+  }, [fire]);
+  const bits = useMemo(() => makeBits(burst || 1), [burst]);
+  if (!burst || reduce) return null;
   return (
-    <View key={fire} pointerEvents="none" style={s.origin}>
-      {bits.map((b, i) => <Particle key={`${fire}-${i}`} b={b} />)}
+    <View key={burst} pointerEvents="none" style={s.origin}>
+      {bits.map((b, i) => <Particle key={`${burst}-${i}`} b={b} />)}
     </View>
   );
 }

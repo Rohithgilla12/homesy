@@ -1,4 +1,4 @@
-import { activitySentence, groupByDay, isFreshFromOthers } from '../activity';
+import { activitySentence, freshArrivals, groupByDay, isFreshFromOthers } from '../activity';
 
 describe('activitySentence', () => {
   it('strips a leading duplicate actor name', () => {
@@ -42,5 +42,25 @@ describe('isFreshFromOthers', () => {
     expect(isFreshFromOthers('u1', 'u1')).toBe(false);
     expect(isFreshFromOthers(null, 'u1')).toBe(false);
     expect(isFreshFromOthers('u2', null)).toBe(false);
+  });
+});
+
+describe('freshArrivals', () => {
+  const me = 'me';
+  const rows = [{ id: 'a', by: 'ann' }, { id: 'b', by: me }, { id: 'c', by: 'ann' }];
+  it('returns nothing on the first load and marks everything seen', () => {
+    const seen = new Set<string>();
+    expect(freshArrivals(seen, rows, (r) => r.by, me, true)).toEqual([]);
+    expect([...seen]).toEqual(['a', 'b', 'c']);
+  });
+  it('returns only unseen rows from other members', () => {
+    const seen = new Set(['a']);
+    expect(freshArrivals(seen, rows, (r) => r.by, me, false)).toEqual(['c']);
+    expect(seen.has('b')).toBe(true);
+  });
+  it('never returns a row twice', () => {
+    const seen = new Set(['a']);
+    freshArrivals(seen, rows, (r) => r.by, me, false);
+    expect(freshArrivals(seen, rows, (r) => r.by, me, false)).toEqual([]);
   });
 });

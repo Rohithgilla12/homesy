@@ -5,7 +5,7 @@
     "scheme": "homesy",
     "version": "0.1.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "app.homesy.mobile",
@@ -28,7 +28,9 @@
           "imageWidth": 120,
           "backgroundColor": "#F6F5F1"
         }
-      ]
+      ],
+      "expo-font",
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true

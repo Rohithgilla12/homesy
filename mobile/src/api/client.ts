@@ -96,9 +96,9 @@ export const api = {
 
   // vault
   vault: (homeId: string) => request<VaultEntry[]>(`/homes/${homeId}/vault`),
-  createVault: (homeId: string, b: { category: VaultCategory; label: string; value: string; is_secret?: boolean; pinned?: boolean; attachment_ids?: string[] }) =>
+  createVault: (homeId: string, b: { category: VaultCategory; label: string; value: string; is_secret?: boolean; pinned?: boolean; attachment_ids?: string[]; ssid?: string | null }) =>
     request<VaultEntry>(`/homes/${homeId}/vault`, { method: 'POST', body: json(b) }),
-  updateVault: (id: string, b: Partial<{ category: VaultCategory; label: string; value: string; is_secret: boolean; pinned: boolean; attachment_ids: string[] }>) =>
+  updateVault: (id: string, b: Partial<{ category: VaultCategory; label: string; value: string; is_secret: boolean; pinned: boolean; attachment_ids: string[]; ssid: string | null }>) =>
     request<VaultEntry>(`/vault/${id}`, { method: 'PATCH', body: json(b) }),
   deleteVault: (id: string) => request<{ ok: true }>(`/vault/${id}`, { method: 'DELETE' }),
 

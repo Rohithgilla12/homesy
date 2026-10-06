@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { Alert, Linking, RefreshControl, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { api } from '@/api/client';
 import { VAULT_CATEGORY_LABEL, type Attachment, type VaultCategory, type VaultEntry } from '@/api/types';
 import { friendlyError } from '@/lib/errors';
+import { defaultSsid, isWifiEntry, phoneNumberFrom, telUrl } from '@/lib/vault';
 import { useActiveHome } from '@/store/home';
 import {
   AttachmentPicker, AttachmentThumb, BlurReveal, Button, Card, Chip, EmptyState, Icon, IconButton, Input, Pill, Pressable, Screen, Sheet, Text,
@@ -19,10 +20,6 @@ const REMASK_MS = 30_000;
 /** Escapes the characters the WIFI: QR payload format reserves (\ ; , : "). */
 const escapeWifi = (v: string) => v.replace(/([\\;,:"])/g, '\\$1');
 
-const isWifiEntry = (e: VaultEntry) => {
-  const l = e.label.toLowerCase();
-  return l.includes('wifi') || l.includes('wi-fi') || (e.category === 'access' && ['network', 'internet', 'router', 'pass'].some((w) => l.includes(w)));
-};
 
 type EntryActions = {
   reveal: (id: string) => void; copy: (e: VaultEntry) => void; edit: (e: VaultEntry) => void;
@@ -33,12 +30,15 @@ type EntryActions = {
 function EntryRow({ e, last, revealed, copied, actions }: { e: VaultEntry; last: boolean; revealed: boolean; copied: boolean; actions: EntryActions }) {
   const w = isWifiEntry(e);
   const tint = category.vault[w ? 'wifi' : e.category] ?? category.vault.other;
+  const phone = !e.is_secret && !w ? phoneNumberFrom(e.value) : null;
+  const call = () => phone && Linking.openURL(telUrl(phone)).catch(() => Alert.alert('Could not start a call', 'This device cannot place phone calls.'));
   return (
     <Pressable
       accessibilityRole="none"
       onLongPress={() => Alert.alert(e.label, undefined, [
         { text: 'Edit', onPress: () => actions.edit(e) },
         { text: e.pinned ? 'Unpin' : 'Pin to top', onPress: () => actions.pin(e) },
+        ...(phone ? [{ text: 'Call', onPress: call }] : []),
         { text: 'Copy value', onPress: () => actions.copy(e) },
         ...(w ? [{ text: 'Show Wi-Fi QR code', onPress: () => actions.wifi(e) }] : []),
         { text: 'Delete', style: 'destructive' as const, onPress: () => actions.remove(e) },
@@ -58,6 +58,10 @@ function EntryRow({ e, last, revealed, copied, actions }: { e: VaultEntry; last:
             <BlurReveal masked="••••••••••" secret={e.value} revealed={revealed} drainMs={REMASK_MS} />
             <Button title={revealed ? 'Hide' : 'Show'} icon={revealed ? 'hide' : 'reveal'} size="sm" variant="ghost" onPress={() => actions.reveal(e.id)} />
           </View>
+        ) : phone ? (
+          <Pressable onPress={call} accessibilityRole="link" accessibilityLabel={`Call ${e.value}`} style={{ alignSelf: 'flex-start' }}>
+            <Text color={color.accentInk} style={{ fontVariant: ['tabular-nums'] }}>{e.value}</Text>
+          </Pressable>
         ) : (
           <Text selectable>{e.value}</Text>
         )}
@@ -74,6 +78,7 @@ function EntryRow({ e, last, revealed, copied, actions }: { e: VaultEntry; last:
         ) : null}
       </View>
       <View style={{ flexDirection: 'row', gap: space(1) }}>
+        {phone ? <IconButton icon="vault.contacts" label={`Call ${e.label}`} tint={color.accentInk} onPress={call} /> : null}
         {!w ? <IconButton icon={copied ? 'copied' : 'copy'} label={`Copy ${e.label}`} tint={copied ? status.ok : undefined} onPress={() => actions.copy(e)} /> : null}
         <IconButton icon="edit" label={`Edit ${e.label}`} onPress={() => actions.edit(e)} />
       </View>
@@ -106,6 +111,7 @@ export default function VaultScreen() {
   const [aValue, setAValue] = useState('');
   const [aSecret, setASecret] = useState(false);
   const [aPinned, setAPinned] = useState(false);
+  const [aSsid, setASsid] = useState('');
   const [aDocs, setADocs] = useState<Attachment[]>([]);
 
   const [editing, setEditing] = useState<VaultEntry | null>(null);
@@ -114,16 +120,17 @@ export default function VaultScreen() {
   const [eValue, setEValue] = useState('');
   const [eSecret, setESecret] = useState(false);
   const [ePinned, setEPinned] = useState(false);
+  const [eSsid, setESsid] = useState('');
   const [eDocs, setEDocs] = useState<Attachment[]>([]);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: key });
   const create = useMutation({
-    mutationFn: () => api.createVault(homeId!, { category: aCat, label: aLabel.trim(), value: aValue.trim(), is_secret: aSecret, pinned: aPinned, attachment_ids: aDocs.map((d) => d.id) }),
-    onSuccess: () => { setAddOpen(false); setALabel(''); setAValue(''); setASecret(false); setAPinned(false); setADocs([]); invalidate(); },
+    mutationFn: () => api.createVault(homeId!, { category: aCat, label: aLabel.trim(), value: aValue.trim(), is_secret: aSecret, pinned: aPinned, attachment_ids: aDocs.map((d) => d.id), ssid: aSsid.trim() || null }),
+    onSuccess: () => { setAddOpen(false); setALabel(''); setAValue(''); setASecret(false); setAPinned(false); setADocs([]); setASsid(''); invalidate(); },
     onError: (e) => Alert.alert('Could not save detail', friendlyError(e, 'generic')),
   });
   const update = useMutation({
-    mutationFn: () => api.updateVault(editing!.id, { category: eCat, label: eLabel.trim(), value: eValue.trim(), is_secret: eSecret, pinned: ePinned, attachment_ids: eDocs.map((d) => d.id) }),
+    mutationFn: () => api.updateVault(editing!.id, { category: eCat, label: eLabel.trim(), value: eValue.trim(), is_secret: eSecret, pinned: ePinned, attachment_ids: eDocs.map((d) => d.id), ssid: eSsid.trim() || null }),
     onSuccess: () => { setEditing(null); invalidate(); },
     onError: (e) => Alert.alert('Could not update detail', friendlyError(e, 'generic')),
   });
@@ -149,12 +156,16 @@ export default function VaultScreen() {
     setCopied(e.id);
     setTimeout(() => setCopied(null), 2000);
   };
-  const openEdit = (e: VaultEntry) => { setEditing(e); setECat(e.category); setELabel(e.label); setEValue(e.value); setESecret(e.is_secret); setEPinned(e.pinned); setEDocs(e.attachments); };
+  const openEdit = (e: VaultEntry) => { setEditing(e); setECat(e.category); setELabel(e.label); setEValue(e.value); setESecret(e.is_secret); setEPinned(e.pinned); setESsid(e.ssid ?? ''); setEDocs(e.attachments); };
   const openWifi = (e: VaultEntry) => {
     setWifi(e); setWifiCopied(false);
-    const cleaned = e.label.replace(/wi-?fi/gi, '').replace(/password/gi, '').replace(/credentials/gi, '').replace(/code/gi, '').replace(/pass/gi, '').trim();
-    setSsid(cleaned || `${home?.name || 'Home'} Wi-Fi`);
+    setSsid(defaultSsid(e, home?.name));
   };
+  const rememberSsid = useMutation({
+    mutationFn: () => api.updateVault(wifi!.id, { ssid: ssid.trim() || null }),
+    onSuccess: (saved) => { setWifi(saved); invalidate(); },
+    onError: (e) => Alert.alert('Could not save the network name', friendlyError(e, 'generic')),
+  });
   const copyWifi = async () => {
     if (!wifi) return;
     await Clipboard.setStringAsync(wifi.value);
@@ -234,7 +245,10 @@ export default function VaultScreen() {
       <Sheet visible={addOpen} onClose={() => setAddOpen(false)} title="Add a detail">
         {categoryChips(aCat, setACat)}
         <Input label="Label" placeholder="e.g. Wi-Fi password, Maid contact, Spare key" value={aLabel} onChangeText={setALabel} />
-        <Input label="Value" placeholder="e.g. +91 98765 43210" value={aValue} onChangeText={setAValue} multiline={!aSecret} secureTextEntry={aSecret} />
+        <Input label="Value" placeholder="e.g. +91 98765 43210" value={aValue} onChangeText={setAValue} multiline={!aSecret} secureToggle={aSecret} />
+        {isWifiEntry({ label: aLabel, category: aCat, ssid: aSsid || null }) ? (
+          <Input label="Network name (SSID)" placeholder="Exactly as it appears in Wi-Fi settings" value={aSsid} onChangeText={setASsid} autoCapitalize="none" autoCorrect={false} />
+        ) : null}
         {docsRow(aDocs, setADocs, true)}
         {switchRow('Hidden', 'Masked until someone taps Show', aSecret, setASecret)}
         <View style={{ gap: space(3) }}>
@@ -246,7 +260,10 @@ export default function VaultScreen() {
       <Sheet visible={!!editing} onClose={() => setEditing(null)} title="Edit detail">
         {categoryChips(eCat, setECat)}
         <Input label="Label" value={eLabel} onChangeText={setELabel} />
-        <Input label="Value" value={eValue} onChangeText={setEValue} secureTextEntry={eSecret} />
+        <Input label="Value" value={eValue} onChangeText={setEValue} secureToggle={eSecret} />
+        {isWifiEntry({ label: eLabel, category: eCat, ssid: eSsid || null }) ? (
+          <Input label="Network name (SSID)" placeholder="Exactly as it appears in Wi-Fi settings" value={eSsid} onChangeText={setESsid} autoCapitalize="none" autoCorrect={false} />
+        ) : null}
         {docsRow(eDocs, setEDocs, false)}
         {switchRow('Hidden', null, eSecret, setESecret)}
         <View style={{ gap: space(3) }}>
@@ -265,7 +282,17 @@ export default function VaultScreen() {
           ) : null}
           <Text variant="label" tone="muted">Scan with the phone camera to connect</Text>
         </Card>
-        <Input label="Network name (SSID)" value={ssid} onChangeText={setSsid} />
+        <Input
+          label="Network name (SSID)"
+          value={ssid}
+          onChangeText={setSsid}
+          autoCapitalize="none"
+          autoCorrect={false}
+          hint={wifi?.ssid ? undefined : 'Must match the network name exactly, including capitals.'}
+        />
+        {wifi && ssid.trim() && ssid.trim() !== (wifi.ssid ?? '') ? (
+          <Button title="Remember this network name" variant="secondary" size="sm" loading={rememberSsid.isPending} onPress={() => rememberSsid.mutate()} style={{ alignSelf: 'flex-start' }} />
+        ) : null}
         <View style={s.passwordRow}>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text variant="caption" tone="muted">Password</Text>

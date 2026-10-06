@@ -27,6 +27,7 @@ export type VaultCategory = 'utilities' | 'contacts' | 'access' | 'documents' | 
 export type VaultEntry = {
   id: string; home_id: string; category: VaultCategory; label: string; value: string;
   is_secret: boolean; pinned: boolean; created_by: string; updated_at: string; attachments: Attachment[];
+  ssid: string | null;
 };
 
 export type NoticePriority = 'normal' | 'urgent';

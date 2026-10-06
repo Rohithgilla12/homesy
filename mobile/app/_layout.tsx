@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFeatures } from '@/store/features';
+import { usePendingLink } from '@/store/pendingLink';
 import { useActiveHome } from '@/store/home';
 import { useSession } from '@/store/session';
 import { ColdStart } from '@/ui/motion';
@@ -59,7 +60,10 @@ export default function Root() {
 
   if (!ready) return null;
   const inAuth = path.startsWith('/login') || path.startsWith('/signup');
-  if (!token && !inAuth) return <Redirect href="/login" />;
+  if (!token && !inAuth) {
+    usePendingLink.getState().remember(path);
+    return <Redirect href="/login" />;
+  }
   if (token && inAuth) return <Redirect href="/" />;
 
   return (

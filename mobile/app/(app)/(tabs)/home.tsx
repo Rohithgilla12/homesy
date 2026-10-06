@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, ScrollView, Share, StyleSheet, Switch, View } from 'react-native';
 import { api } from '@/api/client';
 import { friendlyError } from '@/lib/errors';
+import { inviteLink } from '@/lib/links';
 import { useCelebrate } from '@/store/celebrate';
 import { useActiveHome } from '@/store/home';
 import { useSession } from '@/store/session';
@@ -229,7 +230,7 @@ export default function HomeScreen() {
                   title="Share"
                   icon="share"
                   size="sm"
-                  onPress={() => Share.share({ message: `Join "${detail.name}" on Homesy with invite code: ${detail.invite_code}` })}
+                  onPress={() => Share.share({ message: `Join "${detail.name}" on Homesy: ${inviteLink(detail.invite_code)}\nOr enter invite code ${detail.invite_code} on the Home tab.` })}
                 />
               </View>
             </View>

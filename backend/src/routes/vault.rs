@@ -26,7 +26,8 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-const COLS: &str = "id, home_id, category, label, value, is_secret, pinned, created_by, updated_at";
+const COLS: &str =
+    "id, home_id, category, label, value, is_secret, pinned, created_by, updated_at, ssid";
 const CATEGORIES: &[&str] = &["utilities", "contacts", "access", "documents", "other"];
 
 #[derive(Deserialize)]
@@ -40,6 +41,7 @@ struct CreateEntry {
     pinned: bool,
     #[serde(default)]
     attachment_ids: Vec<Uuid>,
+    ssid: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -51,6 +53,20 @@ struct UpdateEntry {
     pinned: Option<bool>,
     /// Full replacement of the entry's documents when present.
     attachment_ids: Option<Vec<Uuid>>,
+    /// Absent keeps the network name, `null` or blank clears it.
+    #[serde(default, deserialize_with = "double_option_string")]
+    ssid: Option<Option<String>>,
+}
+
+fn double_option_string<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(d).map(Some)
+}
+
+/// Trimmed network name, `None` when blank.
+fn clean_ssid(v: Option<&str>) -> Option<String> {
+    v.map(str::trim).filter(|v| !v.is_empty()).map(String::from)
 }
 
 fn check_category(c: &str) -> AppResult<()> {
@@ -171,8 +187,8 @@ async fn create_entry(
     }
     let docs = checked_documents(&s, home_id, &b.attachment_ids).await?;
     let row: VaultEntry = sqlx::query_as(&format!(
-        "insert into vault_entries (id, home_id, category, label, value, is_secret, pinned, created_by)
-         values ($1, $2, $3, $4, $5, $6, $7, $8) returning {COLS}"
+        "insert into vault_entries (id, home_id, category, label, value, is_secret, pinned, created_by, ssid)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning {COLS}"
     ))
     .bind(Uuid::now_v7())
     .bind(home_id)
@@ -182,6 +198,7 @@ async fn create_entry(
     .bind(b.is_secret)
     .bind(b.pinned)
     .bind(uid)
+    .bind(clean_ssid(b.ssid.as_deref()))
     .fetch_one(&s.pool)
     .await?;
     set_documents(&s, row.id, &docs).await?;
@@ -227,6 +244,7 @@ async fn update_entry(
             value      = coalesce($4, value),
             is_secret  = coalesce($5, is_secret),
             pinned     = coalesce($6, pinned),
+            ssid       = case when $7 then $8 else ssid end,
             updated_at = now()
           where id = $1 returning {COLS}"
     ))
@@ -236,6 +254,8 @@ async fn update_entry(
     .bind(b.value.as_deref().map(str::trim))
     .bind(b.is_secret)
     .bind(b.pinned)
+    .bind(b.ssid.is_some())
+    .bind(b.ssid.as_ref().and_then(|v| clean_ssid(v.as_deref())))
     .fetch_one(&s.pool)
     .await?;
     if let Some(ids) = &docs {

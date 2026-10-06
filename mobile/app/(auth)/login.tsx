@@ -1,9 +1,8 @@
-import { Link, router } from 'expo-router';
+import { Link } from 'expo-router';
 import { useRef, useState } from 'react';
 import type { TextInput } from 'react-native';
 import { api } from '@/api/client';
 import { friendlyError } from '@/lib/errors';
-import { usePendingLink } from '@/store/pendingLink';
 import { useSession } from '@/store/session';
 import { AuthShell, Button, Input, Text, space } from '@/ui';
 
@@ -24,7 +23,6 @@ export default function Login() {
     try {
       const { token, user } = await api.login({ email: cleanEmail, password });
       await signIn(token, user);
-      router.replace(usePendingLink.getState().consume() as never);
     } catch (e) {
       setError(friendlyError(e, 'signin'));
     } finally {

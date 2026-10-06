@@ -245,7 +245,7 @@ export default function VaultScreen() {
       <Sheet visible={addOpen} onClose={() => setAddOpen(false)} title="Add a detail">
         {categoryChips(aCat, setACat)}
         <Input label="Label" placeholder="e.g. Wi-Fi password, Maid contact, Spare key" value={aLabel} onChangeText={setALabel} />
-        <Input label="Value" placeholder="e.g. +91 98765 43210" value={aValue} onChangeText={setAValue} multiline={!aSecret} secureToggle={aSecret} />
+        <Input label="Value" placeholder="e.g. +91 98765 43210" value={aValue} onChangeText={setAValue} multiline={!aSecret} secureToggle={aSecret} autoCapitalize="none" autoCorrect={false} />
         {isWifiEntry({ label: aLabel, category: aCat, ssid: aSsid || null }) ? (
           <Input label="Network name (SSID)" placeholder="Exactly as it appears in Wi-Fi settings" value={aSsid} onChangeText={setASsid} autoCapitalize="none" autoCorrect={false} />
         ) : null}
@@ -260,7 +260,7 @@ export default function VaultScreen() {
       <Sheet visible={!!editing} onClose={() => setEditing(null)} title="Edit detail">
         {categoryChips(eCat, setECat)}
         <Input label="Label" value={eLabel} onChangeText={setELabel} />
-        <Input label="Value" value={eValue} onChangeText={setEValue} secureToggle={eSecret} />
+        <Input label="Value" value={eValue} onChangeText={setEValue} secureToggle={eSecret} autoCapitalize="none" autoCorrect={false} />
         {isWifiEntry({ label: eLabel, category: eCat, ssid: eSsid || null }) ? (
           <Input label="Network name (SSID)" placeholder="Exactly as it appears in Wi-Fi settings" value={eSsid} onChangeText={setESsid} autoCapitalize="none" autoCorrect={false} />
         ) : null}

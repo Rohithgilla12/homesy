@@ -1885,3 +1885,59 @@ async fn attachment_authorization_paths() {
         "someone else's avatar"
     );
 }
+
+#[tokio::test]
+async fn vault_entry_ssid_is_stored_updated_and_cleared() {
+    let (_pool, state) = setup_test_db().await;
+    let app = create_app(state, None);
+    let (token, home) = signup_and_home(&app).await;
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            format!("/homes/{home}/vault"),
+            &token,
+            json!({"category":"access","label":"Wi-Fi password","value":"hunter22","ssid":"  Flat-4B  "}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let entry = parse_json_response(res.into_body()).await;
+    assert_eq!(entry["ssid"], json!("Flat-4B"), "trimmed on create");
+    let id = entry["id"].as_str().unwrap().to_string();
+
+    let patch = |body: Value| {
+        Request::builder()
+            .method("PATCH")
+            .uri(format!("/vault/{id}"))
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+    let res = app
+        .clone()
+        .oneshot(patch(json!({"label":"Home Wi-Fi"})))
+        .await
+        .unwrap();
+    assert_eq!(
+        parse_json_response(res.into_body()).await["ssid"],
+        json!("Flat-4B"),
+        "absent keeps it"
+    );
+    let res = app
+        .clone()
+        .oneshot(patch(json!({"ssid":"Flat-4B-5G"})))
+        .await
+        .unwrap();
+    assert_eq!(
+        parse_json_response(res.into_body()).await["ssid"],
+        json!("Flat-4B-5G"),
+        "set replaces it"
+    );
+    let res = app.oneshot(patch(json!({"ssid": null}))).await.unwrap();
+    assert_eq!(
+        parse_json_response(res.into_body()).await["ssid"],
+        Value::Null,
+        "null clears it"
+    );
+}

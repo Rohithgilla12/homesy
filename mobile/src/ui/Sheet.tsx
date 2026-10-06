@@ -88,7 +88,7 @@ export function Sheet({ visible, onClose, title, children, blur = true }: {
           {blur && Platform.OS === 'ios' ? <BlurView intensity={20} tint="light" style={StyleSheet.absoluteFill} /> : null}
           <RNPressable style={[StyleSheet.absoluteFill, s.scrim]} onPress={onClose} accessibilityLabel="Close" accessibilityRole="button" />
         </Animated.View>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[s.bottom, { paddingTop: insets.top + space(8) }]} pointerEvents="box-none">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[s.bottom, { paddingTop: insets.top + space(8) }]} pointerEvents="box-none">
           <GestureDetector gesture={pan}>
             <Animated.View
               onLayout={(e) => setPanelH(e.nativeEvent.layout.height)}

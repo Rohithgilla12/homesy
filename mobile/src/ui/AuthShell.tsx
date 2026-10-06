@@ -7,7 +7,9 @@ import { color, space } from './tokens';
 /** Shared sign-in / sign-up frame: brand mark, title, subtitle, then the form. Safe areas come from the (auth) layout. */
 export function AuthShell({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
   return (
-    <KeyboardAvoidingView style={s.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    // Both platforms: edge-to-edge Android no longer resizes the window for the keyboard, so without this the
+    // password field sat under it.
+    <KeyboardAvoidingView style={s.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         <View style={s.mark}><Icon name="tab.home" size={28} tint={color.onAccent} /></View>
         <Text variant="display" style={{ marginTop: space(5) }}>{title}</Text>

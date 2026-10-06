@@ -75,6 +75,7 @@ pub struct VaultEntry {
     pub pinned: bool,
     pub created_by: Uuid,
     pub updated_at: DateTime<Utc>,
+    pub ssid: Option<String>,
     #[sqlx(skip)]
     pub attachments: Vec<AttachmentOut>,
 }

@@ -1,4 +1,4 @@
-import { Link, router } from 'expo-router';
+import { Link } from 'expo-router';
 import { useRef, useState } from 'react';
 import type { TextInput } from 'react-native';
 import { api } from '@/api/client';
@@ -27,7 +27,6 @@ export default function Signup() {
     try {
       const { token, user } = await api.signup({ email: cleanEmail, password, display_name: cleanName });
       await signIn(token, user);
-      router.replace('/');
     } catch (e) {
       setError(friendlyError(e, 'signup'));
     } finally {
@@ -56,7 +55,7 @@ export default function Signup() {
         placeholder="At least 8 characters"
         value={password}
         onChangeText={setPassword}
-        secureTextEntry
+        secureToggle
         autoComplete="new-password"
         returnKeyType="done"
         onSubmitEditing={submit}

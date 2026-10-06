@@ -54,6 +54,6 @@ Photos and documents live in a private Cloudflare R2 bucket; the API only hands 
 2. R2 → Manage R2 API tokens → create a token scoped to that bucket with **Object Read & Write**. Store the token in 1Password; it is shown once.
 3. On the box, add to `~/homesy/.env` (the account id is on the R2 overview page; it is not a secret but stays out of the repo):
    `R2_ACCOUNT_ID=…`, `R2_ACCESS_KEY_ID=…`, `R2_SECRET_ACCESS_KEY=…`, `R2_BUCKET=homesy-attachments`
-4. `cd ~/homesy && docker compose -f compose.prod.yml up -d homesy-api`, then check `curl https://homesy-api.gilla.fun/config` returns `{"attachments":true}`.
+4. Copy `deploy/compose.prod.yml` to `~/homesy/compose.yml` if it has changed, then `cd ~/homesy && docker compose up -d`, and check `curl https://homesy-api.gilla.fun/config` returns `{"attachments":true}`.
 
 Objects are keyed `{home_id}/{attachment_id}`; a home's files can be listed or purged by prefix. Pending uploads older than a day are swept by the API itself.
